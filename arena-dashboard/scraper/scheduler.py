@@ -1,22 +1,28 @@
+from apscheduler.schedulers.blocking import BlockingScheduler
 import os
 import logging
-from apscheduler.schedulers.blocking import BlockingScheduler
+from scraper import run_scraper
 
-def start_scheduler(job_function):
-    logger = logging.getLogger(__name__)
-    
-    try:
-        interval_minutes = int(os.environ.get("SCRAPE_INTERVAL_MINUTES", 10))
-    except ValueError:
-        logger.warning("Nieprawidłowa wartość zmiennej SCRAPE_INTERVAL_MINUTES, używam domyślnej: 10 minut.")
-        interval_minutes = 10
+logger = logging.getLogger(__name__)
 
+def start_scheduler():
+    interval_minutes = int(os.getenv('SCRAPE_INTERVAL_MINUTES', 10))
     scheduler = BlockingScheduler()
-    scheduler.add_job(lambda: job_function(is_first_run=False), 'interval', minutes=interval_minutes)
     
-    logger.info(f"Uruchomiono scheduler. Interwał: {interval_minutes} minut.")
+    # Run once immediately
+    logger.info("Running initial scrape...")
+    alert_on_first = os.getenv('ALERT_ON_FIRST_RUN', 'false').lower() == 'true'
+    run_scraper(is_first_run=not alert_on_first)
     
+    # Schedule subsequent runs
+    scheduler.add_job(
+        lambda: run_scraper(is_first_run=False), 
+        'interval', 
+        minutes=interval_minutes
+    )
+    
+    logger.info(f"Scheduler started. Next run in {interval_minutes} minutes.")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Zatrzymano scheduler.")
+        logger.info("Scheduler stopped.")

@@ -3,7 +3,7 @@ version: '3.8'
 services:
   scraper:
     build:
-      context: .
+      context: ./arena-dashboard/scraper
       dockerfile: Dockerfile
     container_name: arena-scraper
     restart: unless-stopped
@@ -17,7 +17,7 @@ services:
 
   web:
     build:
-      context: ./web
+      context: ./arena-dashboard/web
       dockerfile: Dockerfile
     container_name: arena-web
     restart: unless-stopped
