@@ -30,17 +30,17 @@ export function getEvents(): Event[] {
 export function getEventById(id: string): Event | null {
   if (!db) return null;
   try {
-    const stmt = db.prepare(\`
+    const stmt = db.prepare(`
       SELECT 
         id, title, link, date_info as event_date, '' as event_time, 
         CASE WHEN max_available <= 0 THEN 'wyprzedane' ELSE 'aktywne' END as status, 
         max_available, last_seen 
       FROM events 
       WHERE id = ?
-    \`);
+    `);
     return (stmt.get(id) as Event) || null;
   } catch (error) {
-    console.error(\`Błąd podczas pobierania wydarzenia \${id}:\`, error);
+    console.error(`Błąd podczas pobierania wydarzenia ${id}:`, error);
     return null;
   }
 }
@@ -51,15 +51,15 @@ export function getEventById(id: string): Event | null {
 export function getEventSnapshots(eventId: string): Snapshot[] {
   if (!db) return [];
   try {
-    const stmt = db.prepare(\`
+    const stmt = db.prepare(`
       SELECT id, event_id, available_places as available, timestamp as checked_at 
       FROM event_snapshots 
       WHERE event_id = ? 
       ORDER BY timestamp ASC
-    \`);
+    `);
     return stmt.all(eventId) as Snapshot[];
   } catch (error) {
-    console.error(\`Błąd podczas pobierania snapshotów dla wydarzenia \${eventId}:\`, error);
+    console.error(`Błąd podczas pobierania snapshotów dla wydarzenia ${eventId}:`, error);
     return [];
   }
 }
