@@ -1,5 +1,5 @@
 import db from './db';
-import { Event, Snapshot } from './types';
+import { Event, Snapshot } from './types'; // Pamiętaj o dodaniu `current_available?: number | null;` do typu Event w pliku types.ts
 
 /**
  * Pobiera wszystkie wydarzenia z bazy danych.
@@ -9,12 +9,23 @@ export function getEvents(): Event[] {
   if (!db) return [];
   try {
     const stmt = db.prepare(`
-      SELECT 
-        id, title, link, date_info as event_date, '' as event_time, 
-        CASE WHEN max_available <= 0 THEN 'wyprzedane' ELSE 'aktywne' END as status, 
-        max_available, last_seen, image_url
-      FROM events 
-      ORDER BY last_seen DESC
+      WITH LatestSnapshots AS (
+        SELECT
+          event_id,
+          available,
+          ROW_NUMBER() OVER(PARTITION BY event_id ORDER BY checked_at DESC) as rn
+        FROM snapshots
+      )
+      SELECT
+        e.id, e.title, e.link, e.date_info as event_date, '' as event_time,
+        e.status,
+        e.max_available,
+        e.last_seen,
+        e.image_url,
+        ls.available as current_available
+      FROM events e
+      LEFT JOIN LatestSnapshots ls ON e.id = ls.event_id AND ls.rn = 1
+      ORDER BY e.last_seen DESC
     `);
     return stmt.all() as Event[];
   } catch (error) {
@@ -67,10 +78,10 @@ export function getEventSnapshots(eventId: string): Snapshot[] {
   if (!db) return [];
   try {
     const stmt = db.prepare(`
-      SELECT id, event_id, available_places as available, timestamp as checked_at 
-      FROM event_snapshots 
+      SELECT id, event_id, available, checked_at
+      FROM snapshots
       WHERE event_id = ? 
-      ORDER BY timestamp ASC
+      ORDER BY checked_at ASC
     `);
     return stmt.all(eventId) as Snapshot[];
   } catch (error) {
