@@ -17,11 +17,11 @@ export function getEvents(): Event[] {
         FROM snapshots
       )
       SELECT
-        e.id, e.title, e.url as link, e.event_date, e.event_time,
+        e.id, e.title, e.link, e.date_info as event_date, '' as event_time,
         e.status,
         e.max_available,
         e.last_seen,
-        '' as image_url,
+        e.image_url,
         ls.available as current_available
       FROM events e
       LEFT JOIN LatestSnapshots ls ON e.id = ls.event_id AND ls.rn = 1
@@ -43,9 +43,9 @@ export function getEventById(id: string): Event | null {
   try {
     const stmt = db.prepare(`
       SELECT 
-        id, title, url as link, event_date, event_time, 
-        status, 
-        max_available, last_seen, '' as image_url
+        id, title, link, date_info as event_date, '' as event_time, 
+        CASE WHEN max_available <= 0 THEN 'wyprzedane' ELSE 'aktywne' END as status, 
+        max_available, last_seen, image_url
       FROM events 
       WHERE id = ?
     `);
