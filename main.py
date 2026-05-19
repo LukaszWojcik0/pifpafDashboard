@@ -49,6 +49,10 @@ def init_db(db_path: str = DB_FILE):
                 FOREIGN KEY (event_id) REFERENCES events (id)
             )
         ''')
+        try:
+            cursor.execute('ALTER TABLE events ADD COLUMN image_url TEXT')
+        except sqlite3.OperationalError:
+            pass # Kolumna obrazka już istnieje
         conn.commit()
 
 def send_ntfy(ntfy_url: str, title: str, event_title: str, event_date: str, event_time: str, prev_avail: Optional[int], curr_avail: Optional[int], url: str):
@@ -81,6 +85,7 @@ def upsert_event(conn: sqlite3.Connection, event: Dict, is_first_run: bool = Fal
     event_time = event.get("time")
     available = event.get("tickets_available")
     status = event.get("status")
+    image_url = event.get("image_url")
 
     cursor.execute("SELECT id, max_available, status FROM events WHERE url = ?", (url,))
     row = cursor.fetchone()
@@ -94,9 +99,9 @@ def upsert_event(conn: sqlite3.Connection, event: Dict, is_first_run: bool = Fal
         is_new = True
         max_available = available if available is not None else 0
         cursor.execute('''
-            INSERT INTO events (url, title, event_date, event_time, max_available, first_seen, last_seen, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (url, title, event_date, event_time, max_available, now, now, status))
+            INSERT INTO events (url, title, event_date, event_time, max_available, first_seen, last_seen, status, image_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (url, title, event_date, event_time, max_available, now, now, status, image_url))
         event_id = cursor.lastrowid
     else:
         event_id, current_max_available, previous_status = row
@@ -106,9 +111,9 @@ def upsert_event(conn: sqlite3.Connection, event: Dict, is_first_run: bool = Fal
         
         cursor.execute('''
             UPDATE events
-            SET title = ?, event_date = ?, event_time = ?, status = ?, last_seen = ?, max_available = ?
+            SET title = ?, event_date = ?, event_time = ?, status = ?, last_seen = ?, max_available = ?, image_url = COALESCE(?, image_url)
             WHERE id = ?
-        ''', (title, event_date, event_time, status, now, max_available, event_id))
+        ''', (title, event_date, event_time, status, now, max_available, image_url, event_id))
         
         cursor.execute("SELECT available FROM snapshots WHERE event_id = ? ORDER BY id DESC LIMIT 1", (event_id,))
         snap_row = cursor.fetchone()
@@ -205,7 +210,8 @@ def scrape_event_details(session: requests.Session, event_url: str) -> Optional[
         "date": None,
         "time": None,
         "tickets_available": None,
-        "status": "Nieznany"
+        "status": "Nieznany",
+        "image_url": None
     }
 
     title_element = soup.find('h1')
@@ -219,6 +225,14 @@ def scrape_event_details(session: requests.Session, event_url: str) -> Optional[
     time_element = soup.find(class_=re.compile(r'time|czas|godzina', re.I))
     if time_element:
         data["time"] = time_element.get_text(strip=True)
+
+    og_image = soup.find('meta', property='og:image')
+    if og_image and og_image.get('content'):
+        data["image_url"] = og_image['content']
+    else:
+        img_tag = soup.find('img', class_=re.compile(r'wp-post-image'))
+        if img_tag and img_tag.get('src'):
+            data["image_url"] = img_tag['src']
 
     page_text = soup.get_text(separator=' ', strip=True)
     tickets_match = re.search(r'\((\d+)\s+dostępnych\)', page_text, re.IGNORECASE)

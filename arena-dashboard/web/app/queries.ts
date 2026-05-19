@@ -11,7 +11,7 @@ export function getEvents(): Event[] {
     const stmt = db.prepare(`
       SELECT 
         e.id, e.title, e.url as link, e.event_date, e.event_time, 
-        e.status, e.max_available, e.last_seen,
+        e.status, e.max_available, e.last_seen, e.image_url,
         (SELECT available FROM snapshots WHERE event_id = e.id ORDER BY checked_at DESC LIMIT 1) as current_available
       FROM events e
       ORDER BY e.last_seen DESC
@@ -24,7 +24,7 @@ export function getEvents(): Event[] {
         SELECT 
           id, title, link, date_info as event_date, '' as event_time, 
           CASE WHEN max_available <= 0 THEN 'Wyprzedane' ELSE 'Bilety dostępne' END as status, 
-          max_available, last_seen,
+          max_available, last_seen, '' as image_url,
           (SELECT available_places FROM event_snapshots WHERE event_id = events.id ORDER BY timestamp DESC LIMIT 1) as current_available
         FROM events 
         ORDER BY last_seen DESC
@@ -50,7 +50,7 @@ export function getEventById(id: string): Event | null {
     const stmt = db.prepare(`
       SELECT 
         id, title, url as link, event_date, event_time, 
-        status, max_available, last_seen 
+        status, max_available, last_seen, image_url
       FROM events 
       WHERE id = ?
     `);
@@ -62,7 +62,7 @@ export function getEventById(id: string): Event | null {
         SELECT 
           id, title, link, date_info as event_date, '' as event_time, 
           CASE WHEN max_available <= 0 THEN 'Wyprzedane' ELSE 'Bilety dostępne' END as status, 
-          max_available, last_seen 
+          max_available, last_seen, '' as image_url
         FROM events 
         WHERE id = ?
       `);
