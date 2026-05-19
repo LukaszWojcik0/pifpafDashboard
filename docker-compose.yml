@@ -1,5 +1,8 @@
 version: '3.8'
 
+volumes:
+  pifpaf-data:
+
 services:
   scraper:
     build:
@@ -8,12 +11,12 @@ services:
     container_name: arena-scraper
     restart: unless-stopped
     volumes:
-      - ./data:/data
+      - pifpaf-data:/data
     environment:
       - DATABASE_PATH=/data/app.db
-      - SCRAPE_INTERVAL_MINUTES=10
-      - NTFY_URL=
-      - ALERT_ON_FIRST_RUN=false
+      - SCRAPE_INTERVAL_MINUTES=${SCRAPE_INTERVAL_MINUTES:-10}
+      - NTFY_URL=${NTFY_URL}
+      - ALERT_ON_FIRST_RUN=${ALERT_ON_FIRST_RUN:-false}
 
   web:
     build:
@@ -22,9 +25,9 @@ services:
     container_name: arena-web
     restart: unless-stopped
     ports:
-      - "8088:3000"
+      - "${WEB_PORT:-8088}:3000"
     volumes:
-      - ./data:/data
+      - pifpaf-data:/data
     environment:
       - DATABASE_PATH=/data/app.db
     healthcheck:
@@ -33,3 +36,14 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  duckdns:
+    image: lscr.io/linuxserver/duckdns:latest
+    container_name: arena-duckdns
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Warsaw
+      - SUBDOMAINS=${DUCKDNS_SUBDOMAIN}
+      - TOKEN=${DUCKDNS_TOKEN}
