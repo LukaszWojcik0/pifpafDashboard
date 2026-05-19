@@ -13,8 +13,6 @@ services:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
-    ports:
-      - "${WEB_PORT:-8088}:3000/tcp" # Port do dashboardu jest teraz na kontenerze VPN
     volumes:
       - gluetun-data:/gluetun
     environment:
@@ -25,7 +23,6 @@ services:
       - SERVER_COUNTRIES=Poland
       - OPENVPN_PROTOCOL=udp
       - OPENVPN_ENDPOINT_PORT=1194
-      - FIREWALL_VPN_INPUT_PORTS=3000 # Zezwól na ruch przychodzący na porcie dashboardu
       - TZ=Europe/Warsaw
 
   scraper:
@@ -55,8 +52,8 @@ services:
     environment:
       - DATABASE_PATH=/data/app.db
       - HOSTNAME=0.0.0.0
-    network_mode: "service:vpn"
-    depends_on: [vpn]
+    ports:
+      - "${WEB_PORT:-8088}:3000"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
       interval: 30s
@@ -74,5 +71,3 @@ services:
       - TZ=Europe/Warsaw
       - SUBDOMAINS=${DUCKDNS_SUBDOMAIN}
       - TOKEN=${DUCKDNS_TOKEN}
-    network_mode: "service:vpn"
-    depends_on: [vpn]
