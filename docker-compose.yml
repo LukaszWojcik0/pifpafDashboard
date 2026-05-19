@@ -51,6 +51,7 @@ services:
       - pifpaf-data:/data
     environment:
       - DATABASE_PATH=/data/app.db
+      - HOSTNAME=0.0.0.0
     network_mode: "service:vpn"
     depends_on: [vpn]
     healthcheck:
