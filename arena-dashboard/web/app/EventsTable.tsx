@@ -10,6 +10,11 @@ export default function EventsTable({
 }: {
   initialEvents: Event[];
 }) {
+  console.log(
+    "[FRONTEND DEBUG] initialEvents załadowane do EventsTable:",
+    initialEvents,
+  );
+
   const [search, setSearch] = useState("");
 
   const filteredEvents = initialEvents.filter((e) =>

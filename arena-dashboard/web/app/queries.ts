@@ -16,8 +16,20 @@ export function getEvents(): Event[] {
       FROM events e
       ORDER BY e.last_seen DESC
     `);
-    return stmt.all() as Event[];
+
+    const results = stmt.all() as Event[];
+    console.log(
+      `[DB DEBUG] Pobrano ${results.length} wydarzeń z głównego zapytania.`,
+    );
+    if (results.length > 0) {
+      console.log("[DB DEBUG] Przykładowy event (nowy schemat):", results[0]);
+    }
+    return results;
   } catch (error) {
+    console.error(
+      "[DB DEBUG] Błąd głównego zapytania (przechodzę na zapasowe):",
+      error.message,
+    );
     try {
       // Zapasowe zapytanie dla starszych plików bazy danych
       const fallbackStmt = db.prepare(`
@@ -29,7 +41,18 @@ export function getEvents(): Event[] {
         FROM events 
         ORDER BY last_seen DESC
       `);
-      return fallbackStmt.all() as Event[];
+
+      const fallbackResults = fallbackStmt.all() as Event[];
+      console.log(
+        `[DB DEBUG] Pobrano ${fallbackResults.length} wydarzeń z ZAPASOWEGO zapytania.`,
+      );
+      if (fallbackResults.length > 0) {
+        console.log(
+          "[DB DEBUG] Przykładowy event (stary schemat):",
+          fallbackResults[0],
+        );
+      }
+      return fallbackResults;
     } catch (fallbackError) {
       console.error(
         "Błąd podczas pobierania wydarzeń (oba schematy zawiodły):",
