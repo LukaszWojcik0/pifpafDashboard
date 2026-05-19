@@ -11,18 +11,20 @@ services:
     restart: always
     cap_add:
       - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     ports:
       - "${WEB_PORT:-8088}:3000/tcp" # Port do dashboardu jest teraz na kontenerze VPN
     volumes:
-      - /etc/openvpn/privatevpn.conf:/gluetun/custom.conf:ro # Montujemy plik z systemu hosta (tylko do odczytu)
       - gluetun-data:/gluetun
     environment:
-      - VPN_SERVICE_PROVIDER=custom
+      - VPN_SERVICE_PROVIDER=privatevpn
       - VPN_TYPE=openvpn
-      - OPENVPN_CUSTOM_CONFIG=/gluetun/custom.conf # Ścieżka do zamontowanego pliku wewnątrz kontenera
-      - OPENVPN_CUSTOM_CONFIG_RESOLVE=true
       - OPENVPN_USER=${VPN_USER}
       - OPENVPN_PASSWORD=${VPN_PASSWORD}
+      - SERVER_COUNTRIES=Poland
+      - OPENVPN_PROTOCOL=udp
+      - OPENVPN_ENDPOINT_PORT=1194
       - FIREWALL_VPN_INPUT_PORTS=3000 # Zezwól na ruch przychodzący na porcie dashboardu
       - TZ=Europe/Warsaw
 
