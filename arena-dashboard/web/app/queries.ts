@@ -18,8 +18,25 @@ export function getEvents(): Event[] {
     `);
     return stmt.all() as Event[];
   } catch (error) {
-    console.error("Błąd podczas pobierania wydarzeń:", error);
-    return [];
+    try {
+      // Zapasowe zapytanie dla starszych plików bazy danych
+      const fallbackStmt = db.prepare(`
+        SELECT 
+          id, title, link, date_info as event_date, '' as event_time, 
+          CASE WHEN max_available <= 0 THEN 'Wyprzedane' ELSE 'Bilety dostępne' END as status, 
+          max_available, last_seen,
+          (SELECT available_places FROM event_snapshots WHERE event_id = events.id ORDER BY timestamp DESC LIMIT 1) as current_available
+        FROM events 
+        ORDER BY last_seen DESC
+      `);
+      return fallbackStmt.all() as Event[];
+    } catch (fallbackError) {
+      console.error(
+        "Błąd podczas pobierania wydarzeń (oba schematy zawiodły):",
+        fallbackError,
+      );
+      return [];
+    }
   }
 }
 
@@ -39,8 +56,21 @@ export function getEventById(id: string): Event | null {
     `);
     return (stmt.get(id) as Event) || null;
   } catch (error) {
-    console.error(`Błąd podczas pobierania wydarzenia ${id}:`, error);
-    return null;
+    try {
+      // Zapasowe zapytanie dla starszych plików bazy danych
+      const fallbackStmt = db.prepare(`
+        SELECT 
+          id, title, link, date_info as event_date, '' as event_time, 
+          CASE WHEN max_available <= 0 THEN 'Wyprzedane' ELSE 'Bilety dostępne' END as status, 
+          max_available, last_seen 
+        FROM events 
+        WHERE id = ?
+      `);
+      return (fallbackStmt.get(id) as Event) || null;
+    } catch (fallbackError) {
+      console.error(`Błąd podczas pobierania wydarzenia ${id}:`, fallbackError);
+      return null;
+    }
   }
 }
 
@@ -58,10 +88,18 @@ export function getEventSnapshots(eventId: string): Snapshot[] {
     `);
     return stmt.all(eventId) as Snapshot[];
   } catch (error) {
-    console.error(
-      `Błąd podczas pobierania snapshotów dla wydarzenia ${eventId}:`,
-      error,
-    );
-    return [];
+    try {
+      // Zapasowe zapytanie dla starszych plików bazy danych
+      const fallbackStmt = db.prepare(`
+        SELECT id, event_id, available_places as available, timestamp as checked_at 
+        FROM event_snapshots 
+        WHERE event_id = ? 
+        ORDER BY timestamp ASC
+      `);
+      return fallbackStmt.all(eventId) as Snapshot[];
+    } catch (fallbackError) {
+      console.error(`Błąd pobierania snapshotów ${eventId}:`, fallbackError);
+      return [];
+    }
   }
 }
