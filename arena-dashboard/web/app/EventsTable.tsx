@@ -28,8 +28,8 @@ export default function EventsTable({ initialEvents }: { initialEvents: Event[] 
           <thead>
             <tr className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
               <th className="px-6 py-4 font-semibold text-gray-700 dark:text-gray-300">Tytuł</th>
-              <th className="px-6 py-4 font-semibold text-gray-700 dark:text-gray-300 whitespace-nowrap">Data / Czas</th>
-              <th className="px-6 py-4 font-semibold text-gray-700 dark:text-gray-300 whitespace-nowrap">Miejsca</th>
+              <th className="px-6 py-4 font-semibold text-gray-700 dark:text-gray-300 whitespace-nowrap">Data</th>
+              <th className="px-6 py-4 font-semibold text-gray-700 dark:text-gray-300 whitespace-nowrap">Miejsca (Max)</th>
               <th className="px-6 py-4 font-semibold text-gray-700 dark:text-gray-300">Status</th>
               <th className="px-6 py-4 font-semibold text-gray-700 dark:text-gray-300">Szczegóły</th>
             </tr>
@@ -38,7 +38,7 @@ export default function EventsTable({ initialEvents }: { initialEvents: Event[] 
             {filteredEvents.map((event) => (
               <tr key={event.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                 <td className="px-6 py-4 font-medium text-gray-900 dark:text-gray-100">{event.title || 'Brak tytułu'}</td>
-                <td className="px-6 py-4 text-gray-600 dark:text-gray-400 whitespace-nowrap">{event.event_date} {event.event_time}</td>
+                <td className="px-6 py-4 text-gray-600 dark:text-gray-400 whitespace-nowrap">{event.event_date}</td>
                 <td className="px-6 py-4 text-gray-900 dark:text-gray-100 font-semibold">{event.max_available ?? '-'}</td>
                 <td className="px-6 py-4"><StatusBadge status={event.status} /></td>
                 <td className="px-6 py-4">

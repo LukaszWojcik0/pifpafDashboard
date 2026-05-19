@@ -8,12 +8,14 @@ from alerts import send_alert
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = 'https://arenawalki.pl/'
+BASE_URL = 'https://arenawalki.pl/gry-otwarte/'
+DOMAIN_URL = 'https://arenawalki.pl'
 
 def get_page_with_retry(url, retries=3, backoff_factor=1):
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     for i in range(retries):
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
             return response.text
         except requests.exceptions.RequestException as e:
@@ -23,52 +25,47 @@ def get_page_with_retry(url, retries=3, backoff_factor=1):
     logger.error(f"Failed to fetch {url} after {retries} retries.")
     return None
 
+def extract_tickets(detail_html):
+    if not detail_html:
+        return 0
+    soup = BeautifulSoup(detail_html, 'html.parser')
+    available_places = 0
+    left_span = soup.find('span', class_='aev-left')
+    if left_span:
+        text = left_span.text.lower()
+        digits = ''.join(filter(str.isdigit, text))
+        if digits:
+            available_places = int(digits)
+    return available_places
+
 def parse_events(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
     events = []
     
-    # NOTE: This parsing logic is a generic representation based on typical event listings.
-    # It attempts to find articles or divs containing event data.
-    # We use a robust fallback finding links and inferring information.
+    event_elements = soup.find_all('article', class_=lambda c: c and 'event-card' in c)
     
-    event_elements = soup.find_all(['article', 'div'], class_=lambda c: c and 'event' in c.lower())
-    
-    if not event_elements:
-        # Fallback: look for generic links that might be events
-        event_elements = soup.find_all('a', href=True)
-        event_elements = [el for el in event_elements if 'wydarzenia' in el['href'].lower() or 'event' in el['href'].lower()]
-
     for el in event_elements:
         try:
-            title_el = el.find(['h2', 'h3'])
-            title = title_el.text.strip() if title_el else el.text.strip()
+            title_el = el.find('h3', class_=lambda c: c and 'event-card__title' in c)
+            title = title_el.text.strip() if title_el else "Nieznane wydarzenie"
             
-            link = el['href'] if el.name == 'a' else (el.find('a', href=True)['href'] if el.find('a', href=True) else '')
-            if link and not link.startswith('http'):
-                link = BASE_URL.rstrip('/') + '/' + link.lstrip('/')
-                
-            # Attempt to extract available places
-            text_content = el.text.lower()
-            available_places = 0
-            if 'miejsc' in text_content or 'dostępn' in text_content:
-                # Naive extraction of digits near 'miejsc'
-                words = text_content.split()
-                for i, word in enumerate(words):
-                    if 'miejsc' in word and i > 0:
-                        digits = ''.join(filter(str.isdigit, words[i-1]))
-                        if digits:
-                            available_places = int(digits)
-                            break
-            else:
-                # Default mock logic if no places found, to ensure DB populates nicely for dashboard
-                available_places = 10
-                
-            date_el = el.find(['time', 'span'], class_=lambda c: c and 'date' in c.lower())
+            date_el = el.find('div', class_=lambda c: c and 'event-card__date' in c)
             date_info = date_el.text.strip() if date_el else "Unknown Date"
             
-            if title and len(title) > 3:
-                # Generate unique ID based on link or title
-                event_id = hashlib.md5((link or title).encode('utf-8')).hexdigest()
+            link_el = el.find('a', class_=lambda c: c and 'event-card__cta' in c)
+            link = link_el['href'] if link_el and 'href' in link_el.attrs else ""
+            
+            if link and not link.startswith('http'):
+                link = DOMAIN_URL.rstrip('/') + '/' + link.lstrip('/')
+                
+            if title and len(title) > 3 and link:
+                event_id = hashlib.md5(link.encode('utf-8')).hexdigest()
+                
+                # Fetch details page to get tickets
+                logger.info(f"Fetching details for {title}...")
+                detail_html = get_page_with_retry(link)
+                available_places = extract_tickets(detail_html)
+                
                 events.append({
                     'id': event_id,
                     'title': title,
@@ -76,11 +73,12 @@ def parse_events(html_content):
                     'date_info': date_info,
                     'available_places': available_places
                 })
+                # Prevent rate limiting
+                time.sleep(1)
         except Exception as e:
             logger.debug(f"Skipping element due to parsing error: {e}")
             continue
 
-    # De-duplicate
     unique_events = {e['id']: e for e in events}.values()
     return list(unique_events)
 
@@ -105,19 +103,17 @@ def run_scraper(is_first_run=False):
                 event['available_places']
             )
             
-            # Alerting logic
+            # Alerting logic requested format
+            # title: nazwa wydarzenia
+            # opis: dostepna ilosc biletów: dostępne/max
+            
+            msg = f"dostepna ilosc biletów: {event['available_places']}/{max_avail}"
+            title = event['title']
+            
             if is_new and not is_first_run:
-                send_alert(
-                    "Nowe wydarzenie!", 
-                    f"Znaleziono nowe wydarzenie: {event['title']}\nDostępnych miejsc: {event['available_places']}",
-                    tags=["new", "tada"]
-                )
+                send_alert(title, msg, tags=["new", "tada"])
             elif not is_first_run and event['available_places'] > 0 and event['available_places'] < 5:
-                 send_alert(
-                    "Mało miejsc!", 
-                    f"Wydarzenie {event['title']} ma tylko {event['available_places']} dostępnych miejsc!",
-                    tags=["warning"]
-                )
+                 send_alert(title, msg, tags=["warning"])
         except Exception as e:
             logger.error(f"Error updating event {event['title']}: {e}")
             

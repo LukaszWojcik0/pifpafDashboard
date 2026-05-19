@@ -3,12 +3,26 @@ import EventAvailabilityChart from '../../EventAvailabilityChart';
 import StatusBadge from '../../StatusBadge';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import db from '../../db';
+import { revalidatePath } from 'next/cache';
 
 export const dynamic = 'force-dynamic';
 
+async function updateMaxAvailable(formData: FormData) {
+  'use server';
+  const id = formData.get('id') as string;
+  const newMax = parseInt(formData.get('max') as string, 10);
+  
+  if (id && !isNaN(newMax) && db) {
+    db.prepare('UPDATE events SET max_available = ? WHERE id = ?').run(newMax, id);
+    revalidatePath(`/events/${id}`);
+    revalidatePath(`/`);
+  }
+}
+
 export default async function EventPage({ params }: { params: { id: string } }) {
-  const id = parseInt(params.id, 10);
-  if (isNaN(id)) return notFound();
+  const id = params.id;
+  if (!id) return notFound();
 
   const event = getEventById(id);
   if (!event) return notFound();
@@ -26,11 +40,13 @@ export default async function EventPage({ params }: { params: { id: string } }) 
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">{event.title || 'Wydarzenie bez tytułu'}</h1>
             <p className="text-gray-600 dark:text-gray-400 text-lg">
-              Data: <span className="font-semibold text-gray-800 dark:text-gray-200">{event.event_date} {event.event_time}</span>
+              Data: <span className="font-semibold text-gray-800 dark:text-gray-200">{event.event_date}</span>
             </p>
-            <a href={event.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-500 hover:text-blue-600 dark:hover:text-blue-400 mt-3 inline-flex items-center gap-1 transition-colors">
-              Otwórz stronę produktu &#8599;
-            </a>
+            {event.link && (
+              <a href={event.link} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-500 hover:text-blue-600 dark:hover:text-blue-400 mt-3 inline-flex items-center gap-1 transition-colors">
+                Otwórz stronę produktu &#8599;
+              </a>
+            )}
           </div>
           <div className="flex flex-col items-start md:items-end gap-3">
             <StatusBadge status={event.status} />
@@ -40,8 +56,25 @@ export default async function EventPage({ params }: { params: { id: string } }) 
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8">
           <div className="bg-gray-50 dark:bg-gray-900/50 p-5 rounded-xl border border-gray-100 dark:border-gray-700">
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Maksymalnie wykryto</p>
-            <p className="text-3xl font-bold text-gray-900 dark:text-white">{event.max_available ?? 'Brak danych'}</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Początkowa / Maksymalna pula miejsc</p>
+            <div className="flex items-center gap-4">
+              <p className="text-3xl font-bold text-gray-900 dark:text-white">{event.max_available ?? 'Brak danych'}</p>
+              
+              <form action={updateMaxAvailable} className="flex items-center gap-2 ml-4">
+                <input type="hidden" name="id" value={event.id} />
+                <input 
+                  type="number" 
+                  name="max" 
+                  defaultValue={event.max_available ?? 0}
+                  className="w-20 px-2 py-1 border rounded dark:bg-gray-700 dark:border-gray-600 text-sm"
+                  min="1"
+                />
+                <button type="submit" className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors">
+                  Zapisz
+                </button>
+              </form>
+            </div>
+            <p className="text-xs text-gray-400 mt-2">Możesz ręcznie nadpisać ilość biletów, jeśli wydarzenie zostało pobrane po częściowej wyprzedaży.</p>
           </div>
         </div>
       </div>
