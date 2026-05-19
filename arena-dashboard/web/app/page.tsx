@@ -1,4 +1,4 @@
-import { getEvents } from '../lib/queries';
+import { getEvents } from './queries';
 import EventsTable from './EventsTable';
 
 // Zawsze pobieraj aktualne statystyki prosto z bazy SQLite w momencie requestu

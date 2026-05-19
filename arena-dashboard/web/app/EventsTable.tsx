@@ -1,9 +1,9 @@
 "use client";
 
-import { Event } from '../lib/types';
+import { useState } from 'react';
+import { Event } from './types';
 import Link from 'next/link';
 import StatusBadge from './StatusBadge';
-import { useState } from 'react';
 
 export default function EventsTable({ initialEvents }: { initialEvents: Event[] }) {
   const [search, setSearch] = useState('');
