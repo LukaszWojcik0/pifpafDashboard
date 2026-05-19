@@ -55,6 +55,9 @@ def parse_events(html_content):
             link_el = el.find('a', class_=lambda c: c and 'event-card__cta' in c)
             link = link_el['href'] if link_el and 'href' in link_el.attrs else ""
             
+            img_el = el.find('img')
+            image_url = img_el['src'] if img_el and 'src' in img_el.attrs else None
+            
             if link and not link.startswith('http'):
                 link = DOMAIN_URL.rstrip('/') + '/' + link.lstrip('/')
                 
@@ -71,7 +74,8 @@ def parse_events(html_content):
                     'title': title,
                     'link': link,
                     'date_info': date_info,
-                    'available_places': available_places
+                    'available_places': available_places,
+                    'image_url': image_url
                 })
                 # Prevent rate limiting
                 time.sleep(1)
@@ -100,7 +104,8 @@ def run_scraper(is_first_run=False):
                 event['title'], 
                 event['link'], 
                 event['date_info'], 
-                event['available_places']
+                event['available_places'],
+                event.get('image_url')
             )
             
             # Alerting logic requested format

@@ -25,9 +25,16 @@ def init_db():
             date_info TEXT,
             max_available INTEGER DEFAULT 0,
             last_seen TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            image_url TEXT
         )
     ''')
+    
+    # Add image_url to existing events table if not exists
+    try:
+        cursor.execute('ALTER TABLE events ADD COLUMN image_url TEXT')
+    except sqlite3.OperationalError:
+        pass # Column already exists
     
     # Create snapshots table for historical tracking
     cursor.execute('''
@@ -39,12 +46,31 @@ def init_db():
             FOREIGN KEY(event_id) REFERENCES events(id)
         )
     ''')
+
+    # Create system_status table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS system_status (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    ''')
     
     conn.commit()
     conn.close()
     logger.info(f"Database initialized at {DB_PATH}")
 
-def update_event(event_id, title, link, date_info, available_places):
+def update_status(key, value):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO system_status (key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    ''', (key, value))
+    conn.commit()
+    conn.close()
+
+def update_event(event_id, title, link, date_info, available_places, image_url=None):
     conn = get_connection()
     cursor = conn.cursor()
     now = datetime.now()
@@ -57,17 +83,17 @@ def update_event(event_id, title, link, date_info, available_places):
     
     if is_new:
         cursor.execute('''
-            INSERT INTO events (id, title, link, date_info, max_available, last_seen)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (event_id, title, link, date_info, max_available, now))
+            INSERT INTO events (id, title, link, date_info, max_available, last_seen, image_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (event_id, title, link, date_info, max_available, now, image_url))
     else:
         current_max = row[0]
         max_available = max(current_max, available_places)
         cursor.execute('''
             UPDATE events 
-            SET title = ?, link = ?, date_info = ?, max_available = ?, last_seen = ?
+            SET title = ?, link = ?, date_info = ?, max_available = ?, last_seen = ?, image_url = ?
             WHERE id = ?
-        ''', (title, link, date_info, max_available, now, event_id))
+        ''', (title, link, date_info, max_available, now, image_url, event_id))
     
     # Record snapshot
     cursor.execute('''

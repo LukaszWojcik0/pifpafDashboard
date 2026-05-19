@@ -9,7 +9,12 @@ export default function Home() {
 
   return (
     <main className="max-w-7xl mx-auto p-4 md:p-8 pt-8 md:pt-12">
-      <h1 className="text-3xl md:text-4xl font-bold mb-8 text-gray-900 dark:text-white">Dashboard ArenaWalki</h1>
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white">Dashboard ArenaWalki</h1>
+        <a href="/admin" className="text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
+          Admin Panel
+        </a>
+      </div>
       <EventsTable initialEvents={events} />
     </main>
   );

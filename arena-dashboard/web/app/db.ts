@@ -11,9 +11,8 @@ let db: DB | null = null;
 // kiedy plik fizycznie nie istnieje w kontenerze budującym.
 if (process.env.npm_lifecycle_event !== 'build') {
   try {
-    db = new Database(dbPath, { readonly: true });
-    // Nie używamy pragmy na bazie tylko do odczytu
-    // db.pragma('journal_mode = WAL');
+    db = new Database(dbPath);
+    db.pragma('journal_mode = WAL');
   } catch (error) {
     console.error("Błąd połączenia z bazą danych:", error);
     db = null; // Upewniamy się, że db jest null w razie błędu
