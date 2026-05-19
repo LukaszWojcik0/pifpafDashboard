@@ -7,6 +7,8 @@ export interface Event {
   status: string;
   max_available: number | null;
   last_seen: string;
+  image_url?: string | null;
+  current_available?: number | null;
 }
 
 export interface Snapshot {
