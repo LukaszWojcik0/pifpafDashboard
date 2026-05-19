@@ -20,6 +20,7 @@ services:
       - VPN_SERVICE_PROVIDER=custom
       - VPN_TYPE=openvpn
       - OPENVPN_CUSTOM_CONFIG=/gluetun/custom.conf # Ścieżka do zamontowanego pliku wewnątrz kontenera
+      - OPENVPN_CUSTOM_CONFIG_RESOLVE=true
       - OPENVPN_USER=${VPN_USER}
       - OPENVPN_PASSWORD=${VPN_PASSWORD}
       - FIREWALL_VPN_INPUT_PORTS=3000 # Zezwól na ruch przychodzący na porcie dashboardu
