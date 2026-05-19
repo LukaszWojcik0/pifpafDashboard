@@ -11,7 +11,7 @@ async function deleteEvent(formData: FormData) {
   
   if (id && db) {
     // Kaskadowe usunięcie - najpierw historia, potem samo wydarzenie
-    db.prepare('DELETE FROM snapshots WHERE event_id = ?').run(id);
+    db.prepare('DELETE FROM event_snapshots WHERE event_id = ?').run(id);
     db.prepare('DELETE FROM events WHERE id = ?').run(id);
     
     // Wymuszenie odświeżenia obu stron aby nie pokazywały ujęć ze zbuforowanego cache'a
