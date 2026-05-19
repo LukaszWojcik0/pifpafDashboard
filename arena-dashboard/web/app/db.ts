@@ -2,8 +2,13 @@ import Database, { Database as DB } from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
-// W kontenerze używamy zmiennej env. Na lokalnych środowiskach fallback do katalogu z aplikacją
-const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), '../data/app.db');
+const localEventsDb = path.join(process.cwd(), "../../events.db");
+const fallbackDb = path.join(process.cwd(), "../data/app.db");
+
+// Używamy pliku events.db z głównego katalogu (jeśli istnieje) lub app.db
+const dbPath =
+  process.env.DATABASE_PATH ||
+  (fs.existsSync(localEventsDb) ? localEventsDb : fallbackDb);
 
 let db: DB | null = null;
 

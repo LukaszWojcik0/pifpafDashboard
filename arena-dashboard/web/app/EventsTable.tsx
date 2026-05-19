@@ -10,20 +10,6 @@ export default function EventsTable({
 }: {
   initialEvents: Event[];
 }) {
-  console.log("============== DEBUG PRZEGLĄDARKI ==============");
-  console.log("Liczba załadowanych wydarzeń:", initialEvents.length);
-  if (initialEvents.length > 0) {
-    console.log("Dane pierwszego wydarzenia (pełny obiekt):", initialEvents[0]);
-    console.log("Wartość pola image_url:", initialEvents[0].image_url);
-    console.log(
-      "Czy image_url jest pusty?",
-      !initialEvents[0].image_url
-        ? "TAK (Brak zdjęcia)"
-        : "NIE (Powinno być zdjęcie)",
-    );
-  }
-  console.log("================================================");
-
   const [search, setSearch] = useState("");
 
   const filteredEvents = initialEvents.filter((e) =>
