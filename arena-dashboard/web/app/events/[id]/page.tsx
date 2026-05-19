@@ -1,6 +1,6 @@
-import { getEventById, getEventSnapshots } from '../../../lib/queries';
-import EventAvailabilityChart from '../../../components/EventAvailabilityChart';
-import StatusBadge from '../../../components/StatusBadge';
+import { getEventById, getEventSnapshots } from '../../queries';
+import EventAvailabilityChart from '../../EventAvailabilityChart';
+import StatusBadge from '../../StatusBadge';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 

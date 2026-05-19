@@ -9,7 +9,7 @@ import {
   Tooltip,
   ResponsiveContainer
 } from 'recharts';
-import { Snapshot } from '../lib/types';
+import { Snapshot } from './types';
 import { format } from 'date-fns';
 import { pl } from 'date-fns/locale';
 

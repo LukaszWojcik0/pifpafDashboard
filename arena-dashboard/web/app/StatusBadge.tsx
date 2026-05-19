@@ -1,4 +1,4 @@
-import { cn } from '../lib/utils';
+import { cn } from './utils';
 
 export default function StatusBadge({ status }: { status: string }) {
   if (!status) return null;
