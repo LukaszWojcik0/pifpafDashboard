@@ -10,11 +10,11 @@ export function getEvents(): Event[] {
   try {
     const stmt = db.prepare(`
       SELECT 
-        id, title, link, date_info as event_date, '' as event_time, 
-        CASE WHEN max_available <= 0 THEN 'wyprzedane' ELSE 'aktywne' END as status, 
-        max_available, last_seen 
-      FROM events 
-      ORDER BY last_seen DESC
+        e.id, e.title, e.url as link, e.event_date, e.event_time, 
+        e.status, e.max_available, e.last_seen,
+        (SELECT available FROM snapshots WHERE event_id = e.id ORDER BY checked_at DESC LIMIT 1) as current_available
+      FROM events e
+      ORDER BY e.last_seen DESC
     `);
     return stmt.all() as Event[];
   } catch (error) {
@@ -32,9 +32,8 @@ export function getEventById(id: string): Event | null {
   try {
     const stmt = db.prepare(`
       SELECT 
-        id, title, link, date_info as event_date, '' as event_time, 
-        CASE WHEN max_available <= 0 THEN 'wyprzedane' ELSE 'aktywne' END as status, 
-        max_available, last_seen 
+        id, title, url as link, event_date, event_time, 
+        status, max_available, last_seen 
       FROM events 
       WHERE id = ?
     `);
@@ -52,14 +51,17 @@ export function getEventSnapshots(eventId: string): Snapshot[] {
   if (!db) return [];
   try {
     const stmt = db.prepare(`
-      SELECT id, event_id, available_places as available, timestamp as checked_at 
-      FROM event_snapshots 
+      SELECT id, event_id, available, checked_at 
+      FROM snapshots 
       WHERE event_id = ? 
-      ORDER BY timestamp ASC
+      ORDER BY checked_at ASC
     `);
     return stmt.all(eventId) as Snapshot[];
   } catch (error) {
-    console.error(`Błąd podczas pobierania snapshotów dla wydarzenia ${eventId}:`, error);
+    console.error(
+      `Błąd podczas pobierania snapshotów dla wydarzenia ${eventId}:`,
+      error,
+    );
     return [];
   }
 }
