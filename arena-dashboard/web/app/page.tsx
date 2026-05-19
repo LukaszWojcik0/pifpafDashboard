@@ -1,5 +1,5 @@
 import { getEvents } from '../lib/queries';
-import EventsTable from '../components/EventsTable';
+import EventsTable from './EventsTable';
 
 // Zawsze pobieraj aktualne statystyki prosto z bazy SQLite w momencie requestu
 export const dynamic = 'force-dynamic';
