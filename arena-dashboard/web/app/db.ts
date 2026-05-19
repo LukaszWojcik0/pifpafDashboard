@@ -12,7 +12,8 @@ let db: DB | null = null;
 if (process.env.npm_lifecycle_event !== 'build') {
   try {
     db = new Database(dbPath, { readonly: true });
-    db.pragma('journal_mode = WAL');
+    // Nie używamy pragmy na bazie tylko do odczytu
+    // db.pragma('journal_mode = WAL');
   } catch (error) {
     console.error("Błąd połączenia z bazą danych:", error);
     db = null; // Upewniamy się, że db jest null w razie błędu

@@ -11,6 +11,8 @@ services:
     restart: always
     cap_add:
       - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     ports:
       - "${WEB_PORT:-8088}:3000/tcp" # Port do dashboardu jest teraz na kontenerze VPN
     volumes:
