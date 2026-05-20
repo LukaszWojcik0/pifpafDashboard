@@ -64,19 +64,6 @@ services:
       retries: 3
       start_period: 40s
 
-  duckdns:
-    image: lscr.io/linuxserver/duckdns:latest
-    container_name: arena-duckdns
-    restart: unless-stopped
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Europe/Warsaw
-      - SUBDOMAINS=${DUCKDNS_SUBDOMAIN}
-      - TOKEN=${DUCKDNS_TOKEN}
-    network_mode: "service:vpn"
-    depends_on: [vpn]
-
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cloudflare-tunnel
