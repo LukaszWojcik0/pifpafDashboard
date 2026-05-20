@@ -144,3 +144,6 @@ Błąd rzadki z powodu małego ruchu na bazie.
 
 ### Dashboard pusty (wszędzie braki lub myślniki)
 Zazwyczaj to rezultat pierwszego uruchomienia aplikacji webowej, **przed** momentem, w którym cykliczny scraper ukończył swoje pierwsze pełne wejście w wydarzenia (może to potrwać parę sekund). Odśwież stronę po minucie. Jeśli widok nadal jest uszkodzony, prześledź zrzuty danych poprzez wejście w szczegóły wydarzenia - brak logów na wykresie oznacza problem po stronie bazy/scrapera.
+
+
+###
