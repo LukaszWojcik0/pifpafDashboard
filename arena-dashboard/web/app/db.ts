@@ -18,6 +18,20 @@ if (process.env.npm_lifecycle_event !== 'build') {
   try {
     db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
+
+    // Inicjalizacja tabel autoryzacji
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        username TEXT PRIMARY KEY,
+        password_hash TEXT NOT NULL,
+        salt TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        expires_at DATETIME NOT NULL
+      );
+    `);
   } catch (error) {
     console.error("Błąd połączenia z bazą danych:", error);
     db = null; // Upewniamy się, że db jest null w razie błędu
