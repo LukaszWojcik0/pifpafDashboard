@@ -5,8 +5,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import db from '../../db';
 import { revalidatePath } from 'next/cache';
-import { getSession } from '../../auth';
-import { logout } from '../../actions/auth';
+import { getSession, logout } from '../../auth';
 
 export const dynamic = 'force-dynamic';
 

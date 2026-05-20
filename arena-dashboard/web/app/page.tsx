@@ -1,5 +1,5 @@
-import { loginUser } from '../actions/auth';
-import db from '../db';
+import { loginUser } from './auth';
+import db from './db';
 import { redirect } from 'next/navigation';
 
 export default function LoginPage({ searchParams }: { searchParams: { error?: string, msg?: string } }) {

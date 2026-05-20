@@ -1,6 +1,6 @@
 'use server';
 
-import db from '../db';
+import db from './db';
 import crypto from 'crypto';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
