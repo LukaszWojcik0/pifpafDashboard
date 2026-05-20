@@ -26,14 +26,14 @@ export async function setupUser(formData: FormData) {
   // Blokada: Rejestracja dostępna TYLKO jeśli nie ma żadnych użytkowników
   const count = (db.prepare('SELECT count(*) as c FROM users').get() as any).c;
   if (count > 0) {
-    redirect('/login?error=Administrator+już+istnieje');
+    redirect(`/login?error=${encodeURIComponent('Administrator już istnieje')}`);
   }
 
   const username = formData.get('username') as string;
   const password = formData.get('password') as string;
 
   if (!username || username.length < 3 || !password || password.length < 6) {
-    redirect('/setup?error=Dane+są+zbyt+krótkie+(min.+3+znaki+login,+6+hasło)');
+    redirect(`/setup?error=${encodeURIComponent('Dane są zbyt krótkie (min. 3 znaki login, 6 hasło)')}`);
   }
 
   const salt = crypto.randomBytes(16).toString('hex');
@@ -41,7 +41,7 @@ export async function setupUser(formData: FormData) {
 
   db.prepare('INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)').run(username, hash, salt);
   
-  redirect('/login?msg=Konto+utworzone.+Możesz+się+zalogować');
+  redirect(`/login?msg=${encodeURIComponent('Konto utworzone. Możesz się zalogować')}`);
 }
 
 export async function loginUser(formData: FormData) {
@@ -51,10 +51,10 @@ export async function loginUser(formData: FormData) {
   const password = formData.get('password') as string;
 
   const user = db.prepare('SELECT username, password_hash, salt FROM users WHERE username = ?').get(username) as any;
-  if (!user) redirect('/login?error=Nieprawidłowy+login+lub+hasło');
+  if (!user) redirect(`/login?error=${encodeURIComponent('Nieprawidłowy login lub hasło')}`);
 
   const hash = crypto.pbkdf2Sync(password, user.salt, 310000, 64, 'sha512').toString('hex');
-  if (hash !== user.password_hash) redirect('/login?error=Nieprawidłowy+login+lub+hasło');
+  if (hash !== user.password_hash) redirect(`/login?error=${encodeURIComponent('Nieprawidłowy login lub hasło')}`);
 
   const token = crypto.randomBytes(32).toString('hex');
   // Token ważny 7 dni
