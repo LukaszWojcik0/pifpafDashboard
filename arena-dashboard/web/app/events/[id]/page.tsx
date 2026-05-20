@@ -9,9 +9,9 @@ import StatusBadge from '../../StatusBadge';
 
 export const dynamic = 'force-dynamic';
 
-async function updateMaxAvailable(formData: FormData) {
+export async function updateMaxAvailable(formData: FormData) {
   'use server';
-  const session = getSession();
+  const session = await getSession();
   if (!session) {
     throw new Error('Odmowa dostępu. Proszę się zalogować.');
   }
@@ -33,13 +33,13 @@ async function updateMaxAvailable(formData: FormData) {
   }
 }
 
-export default function EventPage({ params }: { params: { id: string } }) {
+export default async function EventPage({ params }: { params: { id: string } }) {
   const { id } = params;
   const event = getEventById(id);
   if (!event) return notFound();
 
   const snapshots = getEventSnapshots(id);
-  const session = getSession();
+  const session = await getSession();
 
   return (
     <main className="max-w-5xl mx-auto p-4 md:p-8 pt-8 md:pt-12">

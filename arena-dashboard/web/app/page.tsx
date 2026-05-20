@@ -5,9 +5,9 @@ import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
-export default function Home() {
+export default async function Home() {
   const events = getEvents();
-  const session = getSession();
+  const session = await getSession();
 
   return (
     <main className="max-w-7xl mx-auto p-4 md:p-8 pt-8 md:pt-12">

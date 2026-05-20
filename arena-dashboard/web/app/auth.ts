@@ -5,6 +5,21 @@ import crypto from 'crypto';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
+export async function getSession(): Promise<string | null> {
+  const cookieStore = cookies();
+  const token = cookieStore.get('session_token')?.value;
+  if (!token || !db) return null;
+  try {
+    const stmt = db.prepare('SELECT username FROM sessions WHERE token = ? AND expires_at > datetime("now")');
+    const session = stmt.get(token) as { username: string } | undefined;
+    return session ? session.username : null;
+  } catch (e) {
+    // Błąd może wystąpić, jeśli np. tabela sesji jeszcze nie istnieje
+    console.error("Błąd podczas weryfikacji sesji:", e);
+    return null;
+  }
+}
+
 export async function setupUser(formData: FormData) {
   if (!db) throw new Error('Brak bazy danych');
   
