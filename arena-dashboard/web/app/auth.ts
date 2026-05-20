@@ -10,7 +10,7 @@ export async function getSession(): Promise<string | null> {
   const token = cookieStore.get('session_token')?.value;
   if (!token || !db) return null;
   try {
-    const stmt = db.prepare('SELECT username FROM sessions WHERE token = ? AND expires_at > datetime("now")');
+    const stmt = db.prepare("SELECT username FROM sessions WHERE token = ? AND expires_at > datetime('now')");
     const session = stmt.get(token) as { username: string } | undefined;
     return session ? session.username : null;
   } catch (e) {
@@ -58,7 +58,7 @@ export async function loginUser(formData: FormData) {
 
   const token = crypto.randomBytes(32).toString('hex');
   // Token ważny 7 dni
-  db.prepare('INSERT INTO sessions (token, username, expires_at) VALUES (?, ?, datetime("now", "+7 days"))').run(token, username);
+  db.prepare("INSERT INTO sessions (token, username, expires_at) VALUES (?, ?, datetime('now', '+7 days'))").run(token, username);
 
   cookies().set('session_token', token, {
     httpOnly: true,
