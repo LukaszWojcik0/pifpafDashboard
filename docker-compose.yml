@@ -76,3 +76,11 @@ services:
       - TOKEN=${DUCKDNS_TOKEN}
     network_mode: "service:vpn"
     depends_on: [vpn]
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflare-tunnel
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
