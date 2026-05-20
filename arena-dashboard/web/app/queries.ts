@@ -36,7 +36,7 @@ export function getEvents(): Event[] {
         SELECT 
           id, title, link, date_info as event_date, '' as event_time, 
           CASE WHEN max_available <= 0 THEN 'Wyprzedane' ELSE 'Bilety dostępne' END as status, 
-          max_available, last_seen, '' as image_url,
+          max_available, last_seen, image_url,
           (SELECT available_places FROM event_snapshots WHERE event_id = events.id ORDER BY timestamp DESC LIMIT 1) as current_available
         FROM events 
         ORDER BY last_seen DESC
@@ -85,7 +85,7 @@ export function getEventById(id: string): Event | null {
         SELECT 
           id, title, link, date_info as event_date, '' as event_time, 
           CASE WHEN max_available <= 0 THEN 'Wyprzedane' ELSE 'Bilety dostępne' END as status, 
-          max_available, last_seen, '' as image_url
+          max_available, last_seen, image_url
         FROM events 
         WHERE id = ?
       `);

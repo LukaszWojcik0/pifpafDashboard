@@ -64,6 +64,8 @@ def parse_events(html_content):
             if title and len(title) > 3 and link:
                 event_id = hashlib.md5(link.encode('utf-8')).hexdigest()
                 
+                logger.info(f"Wydarzenie: '{title}' | Znaleziony URL obrazka: {image_url}")
+
                 # Fetch details page to get tickets
                 logger.info(f"Fetching details for {title}...")
                 detail_html = get_page_with_retry(link)
