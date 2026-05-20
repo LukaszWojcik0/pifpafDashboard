@@ -1,42 +1,31 @@
-import { loginUser } from './auth';
-import db from './db';
-import { redirect } from 'next/navigation';
+import { getEvents } from './queries';
+import EventsTable from './EventsTable';
+import { getSession, logout } from './auth';
+import Link from 'next/link';
 
-export default function LoginPage({ searchParams }: { searchParams: { error?: string, msg?: string } }) {
-  if (db) {
-    const count = (db.prepare('SELECT count(*) as c FROM users').get() as any).c;
-    if (count === 0) {
-      redirect('/setup'); // Skieruj na setup, jeśli baza jest pusta
-    }
-  }
+export const dynamic = 'force-dynamic';
+
+export default function Home() {
+  const events = getEvents();
+  const session = getSession();
 
   return (
-    <div className="max-w-md mx-auto mt-20 p-6 bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Logowanie do panelu</h1>
-      
-      {searchParams.error && (
-        <div className="mb-4 p-3 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-lg text-sm">
-          {searchParams.error}
-        </div>
-      )}
-
-      {searchParams.msg && (
-        <div className="mb-4 p-3 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-lg text-sm">
-          {searchParams.msg}
-        </div>
-      )}
-
-      <form action={loginUser} className="flex flex-col gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nazwa użytkownika</label>
-          <input type="text" name="username" required className="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Hasło</label>
-          <input type="password" name="password" required className="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-        </div>
-        <button type="submit" className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Zaloguj</button>
-      </form>
-    </div>
+    <main className="max-w-7xl mx-auto p-4 md:p-8 pt-8 md:pt-12">
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white">Dashboard Wydarzeń</h1>
+        {session ? (
+          <form action={logout}>
+            <button type="submit" className="text-sm px-3 py-1 bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 rounded transition-colors">
+              Wyloguj ({session})
+            </button>
+          </form>
+        ) : (
+          <Link href="/login" className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+            Panel Admina
+          </Link>
+        )}
+      </div>
+      <EventsTable initialEvents={events} />
+    </main>
   );
 }
