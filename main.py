@@ -37,9 +37,18 @@ def init_db(db_path: str = DB_FILE):
                 max_available INTEGER,
                 first_seen TEXT,
                 last_seen TEXT,
-                status TEXT
+                status TEXT,
+                image_url TEXT
             )
         ''')
+        # Add image_url to existing events table if not exists, for backwards compatibility
+        try:
+            # This will fail if the column already exists (e.g. table was just created), which is fine.
+            cursor.execute('ALTER TABLE events ADD COLUMN image_url TEXT')
+            logging.info("Dodano kolumnę 'image_url' do tabeli 'events' dla istniejącej bazy danych.")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,10 +58,6 @@ def init_db(db_path: str = DB_FILE):
                 FOREIGN KEY (event_id) REFERENCES events (id)
             )
         ''')
-        try:
-            cursor.execute('ALTER TABLE events ADD COLUMN image_url TEXT')
-        except sqlite3.OperationalError:
-            pass # Kolumna obrazka już istnieje
         conn.commit()
 
 def send_ntfy(ntfy_url: str, title: str, event_title: str, event_date: str, event_time: str, prev_avail: Optional[int], curr_avail: Optional[int], url: str):
@@ -111,7 +116,7 @@ def upsert_event(conn: sqlite3.Connection, event: Dict, is_first_run: bool = Fal
         
         cursor.execute('''
             UPDATE events
-            SET title = ?, event_date = ?, event_time = ?, status = ?, last_seen = ?, max_available = ?, image_url = COALESCE(?, image_url)
+            SET title = ?, event_date = ?, event_time = ?, status = ?, last_seen = ?, max_available = ?, image_url = ?
             WHERE id = ?
         ''', (title, event_date, event_time, status, now, max_available, image_url, event_id))
         
@@ -218,6 +223,20 @@ def scrape_event_details(session: requests.Session, event_url: str) -> Optional[
     if title_element:
         data["title"] = title_element.get_text(strip=True)
 
+    # Scrape image URL
+    og_image_meta = soup.find('meta', property='og:image')
+    if og_image_meta and og_image_meta.get('content'):
+        data['image_url'] = og_image_meta['content']
+        logging.info(f"Znaleziono obrazek (og:image) dla {event_url}: {data['image_url']}")
+    else:
+        # Fallback to finding a prominent image on the page
+        image_element = soup.select_one('.wp-post-image, .woocommerce-product-gallery__image img')
+        if image_element and image_element.get('src'):
+            data['image_url'] = urljoin(event_url, image_element['src'])
+            logging.info(f"Znaleziono obrazek (img tag) dla {event_url}: {data['image_url']}")
+        else:
+            logging.warning(f"Nie znaleziono obrazka dla {event_url}")
+
     date_element = soup.find(class_=re.compile(r'date|data', re.I))
     if date_element:
         data["date"] = date_element.get_text(strip=True)
@@ -225,14 +244,6 @@ def scrape_event_details(session: requests.Session, event_url: str) -> Optional[
     time_element = soup.find(class_=re.compile(r'time|czas|godzina', re.I))
     if time_element:
         data["time"] = time_element.get_text(strip=True)
-
-    og_image = soup.find('meta', property='og:image')
-    if og_image and og_image.get('content'):
-        data["image_url"] = og_image['content']
-    else:
-        img_tag = soup.find('img', class_=re.compile(r'wp-post-image'))
-        if img_tag and img_tag.get('src'):
-            data["image_url"] = img_tag['src']
 
     page_text = soup.get_text(separator=' ', strip=True)
     tickets_match = re.search(r'\((\d+)\s+dostępnych\)', page_text, re.IGNORECASE)
