@@ -22,7 +22,7 @@ export async function setupUser(formData: FormData) {
   }
 
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, 310000, 64, 'sha512').toString('hex');
 
   db.prepare('INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)').run(username, hash, salt);
   
@@ -38,7 +38,7 @@ export async function loginUser(formData: FormData) {
   const user = db.prepare('SELECT username, password_hash, salt FROM users WHERE username = ?').get(username) as any;
   if (!user) redirect('/login?error=Nieprawidłowy+login+lub+hasło');
 
-  const hash = crypto.pbkdf2Sync(password, user.salt, 10000, 64, 'sha512').toString('hex');
+  const hash = crypto.pbkdf2Sync(password, user.salt, 310000, 64, 'sha512').toString('hex');
   if (hash !== user.password_hash) redirect('/login?error=Nieprawidłowy+login+lub+hasło');
 
   const token = crypto.randomBytes(32).toString('hex');
@@ -50,6 +50,7 @@ export async function loginUser(formData: FormData) {
     secure: process.env.NODE_ENV === 'production',
     maxAge: 60 * 60 * 24 * 7, // 7 days
     path: '/',
+    sameSite: 'lax',
   });
 
   redirect('/');
