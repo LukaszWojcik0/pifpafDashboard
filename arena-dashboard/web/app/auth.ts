@@ -62,7 +62,7 @@ export async function loginUser(formData: FormData) {
 
   cookies().set('session_token', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: false, // Zmienione na false, aby logowanie działało na HTTP w sieci lokalnej (192.168...)
     maxAge: 60 * 60 * 24 * 7, // 7 days
     path: '/',
     sameSite: 'lax',
