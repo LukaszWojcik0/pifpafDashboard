@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 BASE_URL = 'https://arenawalki.pl/gry-otwarte/'
 DOMAIN_URL = 'https://arenawalki.pl'
 
+# Słownik przechowujący ostatnią widoczną liczbę biletów w pamięci
+last_known_tickets = {}
+
 def get_page_with_retry(url, retries=3, backoff_factor=1):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     for i in range(retries):
@@ -120,7 +123,11 @@ def run_scraper(is_first_run=False):
             if is_new and not is_first_run:
                 send_alert(title, msg, tags=["new", "tada"])
             elif not is_first_run and event['available_places'] > 0 and event['available_places'] < 5:
-                 send_alert(title, msg, tags=["warning"])
+                # Wysyłaj alert tylko jeśli ilość biletów zmieniła się od ostatniego sprawdzenia
+                if last_known_tickets.get(event['id']) != event['available_places']:
+                    send_alert(title, msg, tags=["warning"])
+            
+            last_known_tickets[event['id']] = event['available_places']
         except Exception as e:
             logger.error(f"Error updating event {event['title']}: {e}")
             
