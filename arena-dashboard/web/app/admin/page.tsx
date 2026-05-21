@@ -1,10 +1,17 @@
 import { getEvents } from '../queries';
 import { deleteEvent } from './actions';
 import Link from 'next/link';
+import { getSession } from '../auth';
+import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
-export default function AdminPage() {
+export default async function AdminPage() {
+  const session = await getSession();
+  if (!session) {
+    redirect('/login?error=Zaloguj się, aby uzyskać dostęp do panelu admina');
+  }
+
   const events = getEvents();
 
   return (

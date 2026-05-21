@@ -69,9 +69,19 @@ export default async function EventPage({ params }: { params: { id: string } }) 
               Wyloguj ({session})
             </button>
           </form>
+          <div className="flex items-center gap-4">
+            <Link href="/admin" className="text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors">
+              Panel Admina
+            </Link>
+            <form action={logout}>
+              <button type="submit" className="text-sm px-3 py-1 bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 rounded transition-colors">
+                Wyloguj ({session})
+              </button>
+            </form>
+          </div>
         ) : (
           <Link href="/login" className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-            Panel Admina
+            Zaloguj się
           </Link>
         )}
       </div>
