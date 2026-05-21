@@ -24,6 +24,10 @@ HEADERS = {
 }
 DB_FILE = os.environ.get("DATABASE_PATH", "events.db")
 
+# Słownik do śledzenia anomalii (ile razy pod rząd było 0 lub None)
+anomaly_strikes: Dict[str, int] = {}
+MAX_ANOMALY_STRIKES = 2
+
 def init_db(db_path: str = DB_FILE):
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
@@ -301,8 +305,26 @@ def run_scraper_job(is_first_run: bool = False):
         
         with sqlite3.connect(DB_FILE) as conn:
             for event in results:
+                url = event.get("url")
+                avail = event.get("tickets_available")
+                
+                # Weryfikacja anomalii: jeśli biletów jest 0 lub None, czekamy na potwierdzenie w kolejnych pobraniach
+                if avail == 0 or avail is None:
+                    strikes = anomaly_strikes.get(url, 0)
+                    if strikes < MAX_ANOMALY_STRIKES:
+                        anomaly_strikes[url] = strikes + 1
+                        logging.warning(f"Zignorowano nagły spadek biletów do 0/None dla: '{event.get('title')}'. Próba {strikes + 1}/{MAX_ANOMALY_STRIKES}")
+                        continue # Pomijamy zapis do bazy i ntfy w tym cyklu
+                    else:
+                        # Zostawiamy wartość - anomalia powtórzyła się wystarczająco dużo razy
+                        pass
+                else:
+                    # Normalna wartość (>0) - resetujemy licznik błędów dla tego eventu
+                    if url in anomaly_strikes:
+                        anomaly_strikes[url] = 0
+                        
                 event_id = upsert_event(conn, event, is_first_run)
-                save_snapshot(conn, event_id, event.get("tickets_available"))
+                save_snapshot(conn, event_id, avail)
     except Exception as e:
         logging.error(f"Wystąpił błąd podczas działania scrapera: {e}")
         logging.debug(traceback.format_exc())

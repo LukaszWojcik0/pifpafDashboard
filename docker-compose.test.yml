@@ -1,0 +1,79 @@
+version: '3.8'
+
+volumes:
+  pifpaf-test-data:
+  gluetun-test-data:
+  # Podpinamy istniejący produkcyjny wolumen jako zewnętrzny
+  pifpaf-prod-data:
+    external: true
+    name: pifpaf-dashboard_pifpaf-data # ZMIEŃ TO na rzeczywistą nazwę wolumenu produkcyjnego z zakładki Volumes w Portainerze
+
+services:
+  db-seed:
+    image: alpine
+    container_name: arena-db-seed
+    volumes:
+      - pifpaf-prod-data:/prod:ro    # Zamontowane tylko do odczytu
+      - pifpaf-test-data:/test       # Zamontowane do zapisu
+    # Kopiujemy bazę ze wszystkimi plikami pobocznymi (WAL/SHM) i wypisujemy logi
+    command: sh -c "echo 'Zawartość wolumenu prod:' && ls -la /prod && cp -f /prod/app.db* /test/ && echo 'Skopiowano pomyślnie!'"
+
+  vpn-test:
+    image: qmcgaw/gluetun
+    container_name: gluetun-test
+    restart: always
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "8099:3000/tcp" # Zmieniony port - testowe środowisko będzie pod http://<IP>:8099
+    volumes:
+      - gluetun-test-data:/gluetun
+    environment:
+      - VPN_SERVICE_PROVIDER=privatevpn
+      - VPN_TYPE=openvpn
+      - OPENVPN_USER=${VPN_USER}
+      - OPENVPN_PASSWORD=${VPN_PASSWORD}
+      - SERVER_COUNTRIES=Poland
+      - OPENVPN_PROTOCOL=udp
+      - OPENVPN_ENDPOINT_PORT=1194
+      - FIREWALL_VPN_INPUT_PORTS=3000
+      - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
+      - TZ=Europe/Warsaw
+
+  scraper-test:
+    build:
+      context: ./arena-dashboard/scraper
+      dockerfile: Dockerfile
+    container_name: arena-scraper-test
+    restart: unless-stopped
+    volumes:
+      - pifpaf-test-data:/data
+    environment:
+      - DATABASE_PATH=/data/app.db
+      - SCRAPE_INTERVAL_MINUTES=${SCRAPE_INTERVAL_MINUTES:-10}
+    network_mode: "service:vpn-test"
+    depends_on:
+      vpn-test:
+        condition: service_started
+      db-seed:
+        condition: service_completed_successfully
+
+  web-test:
+    build:
+      context: ./arena-dashboard/web
+      dockerfile: Dockerfile
+    container_name: arena-web-test
+    restart: unless-stopped
+    volumes:
+      - pifpaf-test-data:/data
+    environment:
+      - DATABASE_PATH=/data/app.db
+      - HOSTNAME=0.0.0.0
+    network_mode: "service:vpn-test"
+    depends_on:
+      vpn-test:
+        condition: service_started
+      db-seed:
+        condition: service_completed_successfully
