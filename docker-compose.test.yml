@@ -13,8 +13,8 @@ services:
     image: alpine
     container_name: arena-db-seed
     volumes:
-      - pifpaf-dashboard_pifpaf-data:/prod:ro    # Zamontowane tylko do odczytu
-      - pifpaf-test_pifpaf-test-data:/test       # Zamontowane do zapisu
+      - pifpaf-prod-data:/prod:ro    # Zamontowane tylko do odczytu
+      - pifpaf-test-data:/test       # Zamontowane do zapisu
     # Kopiujemy bazę ze wszystkimi plikami pobocznymi (WAL/SHM) i wypisujemy logi
     command: sh -c "echo 'Zawartość wolumenu prod:' && ls -la /prod && cp -f /prod/app.db* /test/ && echo 'Skopiowano pomyślnie!'"
 
