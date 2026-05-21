@@ -1,0 +1,57 @@
+version: '3.8'
+
+volumes:
+  pifpaf-test-data:
+  gluetun-test-data:
+
+services:
+  vpn-test:
+    image: qmcgaw/gluetun
+    container_name: gluetun-test
+    restart: always
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "8099:3000/tcp" # Zmieniony port - testowe środowisko będzie pod http://<IP>:8099
+    volumes:
+      - gluetun-test-data:/gluetun
+    environment:
+      - VPN_SERVICE_PROVIDER=privatevpn
+      - VPN_TYPE=openvpn
+      - OPENVPN_USER=${VPN_USER}
+      - OPENVPN_PASSWORD=${VPN_PASSWORD}
+      - SERVER_COUNTRIES=Poland
+      - OPENVPN_PROTOCOL=udp
+      - OPENVPN_ENDPOINT_PORT=1194
+      - FIREWALL_VPN_INPUT_PORTS=3000
+      - TZ=Europe/Warsaw
+
+  scraper-test:
+    build:
+      context: ./arena-dashboard/scraper
+      dockerfile: Dockerfile
+    container_name: arena-scraper-test
+    restart: unless-stopped
+    volumes:
+      - pifpaf-test-data:/data
+    environment:
+      - DATABASE_PATH=/data/app.db
+      - SCRAPE_INTERVAL_MINUTES=${SCRAPE_INTERVAL_MINUTES:-10}
+    network_mode: "service:vpn-test"
+    depends_on: [vpn-test]
+
+  web-test:
+    build:
+      context: ./arena-dashboard/web
+      dockerfile: Dockerfile
+    container_name: arena-web-test
+    restart: unless-stopped
+    volumes:
+      - pifpaf-test-data:/data
+    environment:
+      - DATABASE_PATH=/data/app.db
+      - HOSTNAME=0.0.0.0
+    network_mode: "service:vpn-test"
+    depends_on: [vpn-test]
