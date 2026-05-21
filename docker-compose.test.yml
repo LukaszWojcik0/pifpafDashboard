@@ -6,7 +6,7 @@ volumes:
   # Podpinamy istniejący produkcyjny wolumen jako zewnętrzny
   pifpaf-prod-data:
     external: true
-    name: pifpafdashboard_pifpaf-data # ZMIEŃ TO na rzeczywistą nazwę wolumenu produkcyjnego z zakładki Volumes w Portainerze
+    name: pifpaf-dashboard_pifpaf-data # ZMIEŃ TO na rzeczywistą nazwę wolumenu produkcyjnego z zakładki Volumes w Portainerze
 
 services:
   db-seed:
