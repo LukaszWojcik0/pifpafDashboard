@@ -3,8 +3,21 @@ version: '3.8'
 volumes:
   pifpaf-test-data:
   gluetun-test-data:
+  # Podpinamy istniejący produkcyjny wolumen jako zewnętrzny
+  pifpaf-prod-data:
+    external: true
+    name: pifpafdashboard_pifpaf-data # ZMIEŃ TO na rzeczywistą nazwę wolumenu produkcyjnego z zakładki Volumes w Portainerze
 
 services:
+  db-seed:
+    image: alpine
+    container_name: arena-db-seed
+    volumes:
+      - pifpaf-dashboard_pifpaf-data:/prod:ro    # Zamontowane tylko do odczytu
+      - pifpaf-test_pifpaf-test-data:/test       # Zamontowane do zapisu
+    # Kopiujemy bazę ze wszystkimi plikami pobocznymi (WAL/SHM) i wypisujemy logi
+    command: sh -c "echo 'Zawartość wolumenu prod:' && ls -la /prod && cp -f /prod/app.db* /test/ && echo 'Skopiowano pomyślnie!'"
+
   vpn-test:
     image: qmcgaw/gluetun
     container_name: gluetun-test
@@ -40,7 +53,11 @@ services:
       - DATABASE_PATH=/data/app.db
       - SCRAPE_INTERVAL_MINUTES=${SCRAPE_INTERVAL_MINUTES:-10}
     network_mode: "service:vpn-test"
-    depends_on: [vpn-test]
+    depends_on:
+      vpn-test:
+        condition: service_started
+      db-seed:
+        condition: service_completed_successfully
 
   web-test:
     build:
@@ -54,4 +71,8 @@ services:
       - DATABASE_PATH=/data/app.db
       - HOSTNAME=0.0.0.0
     network_mode: "service:vpn-test"
-    depends_on: [vpn-test]
+    depends_on:
+      vpn-test:
+        condition: service_started
+      db-seed:
+        condition: service_completed_successfully
