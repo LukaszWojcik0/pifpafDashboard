@@ -39,6 +39,7 @@ services:
       - OPENVPN_PROTOCOL=udp
       - OPENVPN_ENDPOINT_PORT=1194
       - FIREWALL_VPN_INPUT_PORTS=3000
+      - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
       - TZ=Europe/Warsaw
 
   scraper-test:
