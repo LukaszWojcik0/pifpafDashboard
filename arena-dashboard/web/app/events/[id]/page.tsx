@@ -41,6 +41,21 @@ export default async function EventPage({ params }: { params: { id: string } }) 
   const snapshots = getEventSnapshots(id);
   const session = await getSession();
 
+  // 1. Logika dla wykresu ogólnego (z dnia na dzień)
+  const dailyMap = new Map();
+  snapshots.forEach(s => {
+    if (s.checked_at) {
+      const dateStr = s.checked_at.split('T')[0]; // Pobiera format YYYY-MM-DD
+      dailyMap.set(dateStr, s); // Nadpisuje starsze rekordy z tego samego dnia (zostaje ostatni pomiar w dniu)
+    }
+  });
+  const dailySnapshots = Array.from(dailyMap.values());
+
+  // 2. Logika dla wykresu szczegółowego (wczoraj i dziś)
+  const now = new Date();
+  const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const recentSnapshots = snapshots.filter(s => new Date(s.checked_at) >= startOfYesterday);
+
   return (
     <main className="max-w-5xl mx-auto p-4 md:p-8 pt-8 md:pt-12">
       <div className="flex justify-between items-center mb-6">
@@ -108,8 +123,22 @@ export default async function EventPage({ params }: { params: { id: string } }) 
       <div>
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Historia dostępności biletów</h2>
         {snapshots.length > 0 ? (
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm p-6 border border-gray-200 dark:border-gray-700">
-            <EventAvailabilityChart snapshots={snapshots} />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm p-6 border border-gray-200 dark:border-gray-700">
+              <h3 className="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-200">Ogólny trend (z dnia na dzień)</h3>
+              <EventAvailabilityChart snapshots={dailySnapshots} />
+            </div>
+            
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm p-6 border border-gray-200 dark:border-gray-700 flex flex-col">
+              <h3 className="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-200">Szczegółowe (wczoraj i dziś)</h3>
+              {recentSnapshots.length > 0 ? (
+                <EventAvailabilityChart snapshots={recentSnapshots} />
+              ) : (
+                <div className="flex-1 flex min-h-[200px] items-center justify-center">
+                  <p className="text-gray-500 dark:text-gray-400">Brak zmian w ostatnich dwóch dniach.</p>
+                </div>
+              )}
+            </div>
           </div>
         ) : (
           <p className="text-gray-500 dark:text-gray-400">Brak danych historycznych dla tego wydarzenia.</p>
