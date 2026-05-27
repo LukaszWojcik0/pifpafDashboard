@@ -7,6 +7,7 @@ import re
 import sqlite3
 from urllib.parse import urljoin
 import json
+from datetime import datetime
 from db import update_event, get_connection
 from alerts import send_alert
 
@@ -122,6 +123,9 @@ def run_scraper(is_first_run=False):
         is_api = source.get('is_api') == 1
         
         if is_api:
+            if "{TODAY}" in list_url:
+                list_url = list_url.replace("{TODAY}", datetime.now().strftime('%Y-%m-%dT00:00:00.000Z'))
+                
             logger.info(f"=== Rozpoczynam pobieranie (API JSON) z: {source['name']} ({list_url}) ===")
             response_text = get_page_with_retry(list_url)
             if not response_text:

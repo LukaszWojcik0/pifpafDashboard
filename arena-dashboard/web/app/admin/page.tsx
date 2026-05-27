@@ -4,7 +4,7 @@ import db from '../db';
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import { getEvents } from '../queries';
-import SelectorBuilder from '../../components/SelectorBuilder';
+import SourceForm from '../../components/SourceForm';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +13,37 @@ async function addSource(formData: FormData) {
   const session = await getSession();
   if (!session) throw new Error('Brak uprawnień');
 
-  const is_api = parseInt(formData.get('is_api') as string || '0', 10);
+  const preset = formData.get('preset') as string;
+  let list_url = formData.get('list_url') as string;
+  let is_api = parseInt(formData.get('is_api') as string || '0', 10);
+  let list_links_selector = formData.get('list_links_selector') as string;
+  let title_selector = formData.get('title_selector') as string;
+  let date_selector = formData.get('date_selector') as string;
+  let time_selector = formData.get('time_selector') as string;
+  let image_selector = formData.get('image_selector') as string;
+  let tickets_regex = formData.get('tickets_regex') as string;
+  let sold_out_regex = formData.get('sold_out_regex') as string;
+
+  if (preset === 'playair') {
+    const playairUrl = formData.get('playair_url') as string;
+    let arenaId = '';
+    const match = playairUrl.match(/arenaIds=([a-z0-9]+)/i);
+    if (match) arenaId = match[1];
+    else if (playairUrl.length === 32 && !playairUrl.includes('/')) arenaId = playairUrl;
+    
+    if (!arenaId) throw new Error('Nie znaleziono ID areny PlayAir w podanym linku!');
+    
+    list_url = `https://api.playair.pro/api/event?arenaIds=${arenaId}&page=0&size=50&sort=startDate&startDate={TODAY}`;
+    is_api = 1;
+    list_links_selector = 'content';
+    title_selector = 'name';
+    date_selector = 'startDate';
+    time_selector = 'startDate';
+    image_selector = 'pictureId';
+    tickets_regex = 'defaultData.playersLimit';
+    sold_out_regex = 'id';
+  }
+
   if (db) {
     const stmt = db.prepare(`
       INSERT INTO scraping_sources 
@@ -23,14 +53,14 @@ async function addSource(formData: FormData) {
     
     stmt.run(
       formData.get('name') as string,
-      formData.get('list_url') as string,
-      formData.get('list_links_selector') as string,
-      formData.get('title_selector') as string,
-      formData.get('date_selector') as string,
-      formData.get('time_selector') as string,
-      formData.get('image_selector') as string,
-      formData.get('tickets_regex') as string,
-      formData.get('sold_out_regex') as string,
+      list_url,
+      list_links_selector,
+      title_selector,
+      date_selector,
+      time_selector,
+      image_selector,
+      tickets_regex,
+      sold_out_regex,
       formData.get('ntfy_url') as string,
       formData.get('ntfy_template') as string,
       is_api
@@ -120,82 +150,7 @@ export default async function AdminPage({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700">
           <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Dodaj nowe źródło wydarzeń</h2>
-          
-          <details className="mb-6 bg-blue-50 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-800">
-            <summary className="p-3 font-semibold text-blue-800 dark:text-blue-300 cursor-pointer">ℹ️ Jak pobierać dane z API (PlayAir i podobne)? Kliknij!</summary>
-            <div className="p-3 text-sm text-blue-900 dark:text-blue-200 space-y-2 border-t border-blue-200 dark:border-blue-800">
-              <p>1. Wejdź na stronę docelową w przeglądarce (np. PlayAir).</p>
-              <p>2. Wciśnij <strong>F12</strong> i przejdź do zakładki <strong>Sieć (Network)</strong>. Zaznacz filtr <strong>Fetch/XHR</strong>.</p>
-              <p>3. Odśwież stronę. Poszukaj zapytania po lewej, które ma w nazwie <code>events</code> lub podobnie i zwraca listę.</p>
-              <p>4. Skopiuj jego <strong>Adres URL (Request URL)</strong> i wklej jako <i>Adres URL źródła</i> poniżej.</p>
-              <p>5. Kliknij na to zapytanie, przejdź do zakładki <strong>Odpowiedź (Response)</strong>, skopiuj cały tekst i wklej na dole strony do <i>Kreatora JSON</i>.</p>
-            </div>
-          </details>
-
-          <form action={addSource} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nazwa (np. Miejscówka 2)</label>
-              <input type="text" name="name" required className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Typ pobierania danych</label>
-              <select name="is_api" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-                  <option value="0">🌐 Tradycyjna Strona HTML (Selektory CSS)</option>
-                  <option value="1">⚙️ Interfejs API (Ścieżki JSON)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Adres URL (HTML lub API)</label>
-              <input type="url" name="list_url" required placeholder="https://..." className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">HTML: Linki wydarzeń / JSON: Ścieżka do tablicy</label>
-              <input type="text" name="list_links_selector" placeholder='np. a.event-card LUB data.items' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tytuł (CSS LUB Klucz JSON)</label>
-              <input type="text" name="title_selector" placeholder="np. h1.title LUB name" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data</label>
-                <input type="text" name="date_selector" placeholder='np. .date LUB startDate' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Czas</label>
-                <input type="text" name="time_selector" placeholder='np. .time LUB startTime' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Obrazek (CSS LUB Klucz JSON)</label>
-              <input type="text" name="image_selector" placeholder='np. meta[property="og:image"] LUB coverUrl' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Bilety (Regex HTML LUB Klucz JSON)</label>
-              <input type="text" name="tickets_regex" placeholder='np. \((\d+) dostępnych\) LUB stock.available' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Wyprzedane Regex (HTML) LUB Klucz ID Wydarzenia (JSON)</label>
-              <input type="text" name="sold_out_regex" placeholder='np. wyprzedane LUB id' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-            </div>
-            
-            <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-              <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-3">Customizacja Powiadomień (Opcjonalne)</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Indywidualny kanał NTFY (URL)</label>
-                  <input type="url" name="ntfy_url" placeholder="https://ntfy.sh/twoj-kanal-miejscowki" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Szablon wiadomości ({'{title}'}, {'{available}'}, {'{max}'})</label>
-                  <input type="text" name="ntfy_template" placeholder="np. {title} ma dostępne {available} biletów!" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-                </div>
-              </div>
-            </div>
-            <button type="submit" className="w-full bg-blue-600 text-white font-medium py-2 rounded-lg hover:bg-blue-700 transition-colors">
-              Zapisz źródło
-            </button>
-          </form>
+          <SourceForm action={addSource} />
         </div>
 
         <div className="lg:col-span-2 space-y-4">
@@ -215,10 +170,6 @@ export default async function AdminPage({
               <p className="text-xs text-gray-500 font-mono">Tytuł: {src.title_selector || 'Domyślny'}</p>
             </div>
           ))}
-        </div>
-        
-        <div className="lg:col-span-3">
-          <SelectorBuilder />
         </div>
       </div>
       )}
