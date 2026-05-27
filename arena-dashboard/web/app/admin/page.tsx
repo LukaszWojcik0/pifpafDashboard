@@ -33,28 +33,80 @@ async function addSource(formData: FormData) {
   }
 }
 
-export default async function AdminPage() {
+async function deleteEvent(formData: FormData) {
+  'use server';
+  const session = await getSession();
+  if (!session) throw new Error('Brak uprawnień');
+
+  const id = formData.get('id');
+  if (db && id) {
+    db.prepare('DELETE FROM snapshots WHERE event_id = ?').run(id);
+    db.prepare('DELETE FROM events WHERE id = ?').run(id);
+    revalidatePath('/admin');
+  }
+}
+
+async function deleteSource(formData: FormData) {
+  'use server';
+  const session = await getSession();
+  if (!session) throw new Error('Brak uprawnień');
+
+  const id = formData.get('id');
+  if (db && id) {
+    db.prepare('DELETE FROM scraping_sources WHERE id = ?').run(id);
+    revalidatePath('/admin');
+  }
+}
+
+export default async function AdminPage({
+  searchParams,
+}: {
+  searchParams: { [key: string]: string | string[] | undefined };
+}) {
   const session = await getSession();
   if (!session) {
     redirect('/login');
   }
 
+  const currentTab = searchParams.tab === 'events' ? 'events' : 'sources';
+
   let sources: any[] = [];
+  let events: any[] = [];
   if (db) {
-    sources = db.prepare('SELECT * FROM scraping_sources ORDER BY id DESC').all();
+    if (currentTab === 'sources') {
+      sources = db.prepare('SELECT * FROM scraping_sources ORDER BY id DESC').all();
+    } else {
+      events = db.prepare('SELECT id, title, url, event_date FROM events ORDER BY last_seen DESC').all();
+    }
   }
 
   return (
     <main className="max-w-7xl mx-auto p-4 md:p-8 pt-8 md:pt-12">
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Panel Administratora</h1>
         <Link href="/" className="text-blue-600 hover:text-blue-800 transition-colors">
           &larr; Powrót do Dashboardu
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-1 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="flex space-x-4 border-b border-gray-200 dark:border-gray-700 mb-8">
+        <Link 
+          href="?tab=sources" 
+          className={`pb-3 px-2 text-sm font-medium border-b-2 transition-colors ${currentTab === 'sources' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'}`}
+        >
+          Źródła Skrapowania
+        </Link>
+        <Link 
+          href="?tab=events" 
+          className={`pb-3 px-2 text-sm font-medium border-b-2 transition-colors ${currentTab === 'events' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'}`}
+        >
+          Zarządzanie Wydarzeniami
+        </Link>
+      </div>
+
+      {currentTab === 'sources' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-1 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700">
           <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Dodaj nowe źródło wydarzeń</h2>
           <form action={addSource} className="space-y-4">
             <div>
@@ -100,11 +152,15 @@ export default async function AdminPage() {
         <div className="lg:col-span-2 space-y-4">
           <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Podłączone serwisy ({sources.length})</h2>
           {sources.map((src) => (
-            <div key={src.id} className="bg-white dark:bg-gray-800 p-5 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+            <div key={src.id} className="bg-white dark:bg-gray-800 p-5 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 relative">
+              <form action={deleteSource} className="absolute top-5 right-5">
+                <input type="hidden" name="id" value={src.id} />
+                <button type="submit" className="text-red-500 hover:text-red-700 text-sm font-medium p-1">Usuń</button>
+              </form>
               <div className="flex justify-between items-start mb-2">
                 <h3 className="font-bold text-lg text-gray-900 dark:text-white">{src.name} {src.is_active ? '🟢' : '🔴'}</h3>
               </div>
-              <a href={src.list_url} target="_blank" rel="noreferrer" className="text-blue-500 text-sm hover:underline break-all mb-4 block">
+              <a href={src.list_url} target="_blank" rel="noreferrer" className="text-blue-500 text-sm hover:underline break-all mb-4 block pr-12">
                 {src.list_url}
               </a>
               <p className="text-xs text-gray-500 font-mono">Tytuł: {src.title_selector || 'Domyślny'}</p>
@@ -112,6 +168,41 @@ export default async function AdminPage() {
           ))}
         </div>
       </div>
+      )}
+
+      {currentTab === 'events' && (
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Zarządzanie zapisanymi wydarzeniami</h2>
+          </div>
+          <div className="divide-y divide-gray-200 dark:divide-gray-700">
+            {events.map((evt) => (
+              <div key={evt.id} className="p-4 sm:p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                <div className="overflow-hidden w-full">
+                  <h3 className="font-medium text-gray-900 dark:text-white truncate">{evt.title || 'Brak tytułu'}</h3>
+                  <div className="text-sm text-gray-500 dark:text-gray-400 mt-1 flex flex-col sm:flex-row sm:gap-4">
+                    <span>Data: {evt.event_date || 'Brak'}</span>
+                    <a href={evt.url} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline truncate block max-w-full">
+                      {evt.url}
+                    </a>
+                  </div>
+                </div>
+                <form action={deleteEvent}>
+                  <input type="hidden" name="id" value={evt.id} />
+                  <button type="submit" className="px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors font-medium text-sm whitespace-nowrap">
+                    Usuń
+                  </button>
+                </form>
+              </div>
+            ))}
+            {events.length === 0 && (
+              <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+                Brak wydarzeń w bazie danych.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </main>
   );
 }

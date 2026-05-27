@@ -378,7 +378,7 @@ if __name__ == "__main__":
     
     # Pobranie interwału z env (domyślnie 10)
     try:
-        interval_minutes = int(os.environ.get("SCRAPE_INTERVAL_MINUTES", 10))
+        interval_minutes = int(os.environ.get("SCRAPE_INTERVAL_MINUTES", 1))
     except ValueError:
         logging.warning("Nieprawidłowa wartość zmiennej SCRAPE_INTERVAL_MINUTES, używam domyślnej 10.")
         interval_minutes = 10
