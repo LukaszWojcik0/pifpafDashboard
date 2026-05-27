@@ -55,6 +55,30 @@ def init_db():
         )
     ''')
     
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS scraping_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            list_url TEXT NOT NULL,
+            list_links_selector TEXT,
+            title_selector TEXT,
+            date_selector TEXT,
+            time_selector TEXT,
+            image_selector TEXT,
+            tickets_regex TEXT,
+            sold_out_regex TEXT,
+            is_active INTEGER DEFAULT 1
+        )
+    ''')
+    cursor.execute("SELECT count(*) FROM scraping_sources")
+    if cursor.fetchone()[0] == 0:
+        logger.info("Brak źródeł skrapowania. Inicjowanie domyślnym źródłem: Arena Walki.")
+        cursor.execute('''
+            INSERT INTO scraping_sources 
+            (name, list_url, list_links_selector, title_selector, date_selector, time_selector, image_selector, tickets_regex, sold_out_regex)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', ('Arena Walki', 'https://arenawalki.pl/gry-otwarte/', 'a[href*="/produkt/"], a[href*="/wydarzenie/"]', 'h1', '[class*="date"], [class*="data"]', '[class*="time"], [class*="czas"], [class*="godzina"]', 'meta[property="og:image"], .wp-post-image, .woocommerce-product-gallery__image img', r'\((\d+)\s+dostępnych\)', r'wyprzedane|brak biletów|brak w magazynie|sprzedaż zamknięta'))
+
     conn.commit()
     conn.close()
     logger.info(f"Database initialized at {DB_PATH}")

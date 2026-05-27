@@ -3,13 +3,13 @@ from bs4 import BeautifulSoup
 import logging
 import hashlib
 import time
-from db import update_event
+import re
+import sqlite3
+from urllib.parse import urljoin
+from db import update_event, get_connection
 from alerts import send_alert
 
 logger = logging.getLogger(__name__)
-
-BASE_URL = 'https://arenawalki.pl/gry-otwarte/'
-DOMAIN_URL = 'https://arenawalki.pl'
 
 def get_page_with_retry(url, retries=3, backoff_factor=1):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
@@ -25,81 +25,140 @@ def get_page_with_retry(url, retries=3, backoff_factor=1):
     logger.error(f"Failed to fetch {url} after {retries} retries.")
     return None
 
-def extract_tickets(detail_html):
-    if not detail_html:
-        return 0
-    soup = BeautifulSoup(detail_html, 'html.parser')
-    available_places = 0
-    left_span = soup.find('span', class_='aev-left')
-    if left_span:
-        text = left_span.text.lower()
-        digits = ''.join(filter(str.isdigit, text))
-        if digits:
-            available_places = int(digits)
-    return available_places
-
-def parse_events(html_content):
+def get_event_urls(html_content, list_url, link_selector):
     soup = BeautifulSoup(html_content, 'html.parser')
-    events = []
+    event_urls = set()
     
-    event_elements = soup.find_all('article', class_=lambda c: c and 'event-card' in c)
+    try:
+        links_elements = soup.select(link_selector) if link_selector else soup.find_all('a', href=True)
+        for link in links_elements:
+            if not link.has_attr('href'):
+                continue
+            href = link['href']
+            text = link.get_text(separator=' ', strip=True).lower()
+            
+            if link_selector or "dołącz" in text or "kup" in text or "bilet" in text or "/produkt/" in href or "/wydarzenie/" in href:
+                full_url = urljoin(list_url, href)
+                if full_url != list_url:
+                    event_urls.add(full_url)
+    except Exception as e:
+        logger.error(f"Błąd przetwarzania selektora linków: {e}")
+        
+    return list(event_urls)
+
+def scrape_event_details(html_content, event_url, config):
+    soup = BeautifulSoup(html_content, 'html.parser')
+    data = {
+        "title": None,
+        "url": event_url,
+        "date": None,
+        "time": None,
+        "tickets_available": 0,
+        "status": "Nieznany",
+        "image_url": None
+    }
+
+    # Title
+    title_element = soup.select_one(config.get('title_selector')) if config.get('title_selector') else soup.find('h1')
+    if title_element:
+        data["title"] = title_element.get_text(strip=True)
+
+    # Image
+    if config.get('image_selector'):
+        for selector in config['image_selector'].split(','):
+            img_element = soup.select_one(selector.strip())
+            if img_element:
+                if img_element.name == 'meta' and img_element.get('content'):
+                    data['image_url'] = img_element['content']
+                    break
+                elif img_element.name == 'img' and img_element.get('src'):
+                    data['image_url'] = urljoin(event_url, img_element['src'])
+                    break
+    if not data['image_url']:
+        og_image_meta = soup.find('meta', property='og:image')
+        if og_image_meta and og_image_meta.get('content'):
+            data['image_url'] = og_image_meta['content']
+
+    # Date & Time
+    date_element = soup.select_one(config.get('date_selector')) if config.get('date_selector') else soup.find(class_=re.compile(r'date|data', re.I))
+    if date_element:
+        data["date"] = date_element.get_text(strip=True)
+
+    time_element = soup.select_one(config.get('time_selector')) if config.get('time_selector') else soup.find(class_=re.compile(r'time|czas|godzina', re.I))
+    if time_element:
+        data["time"] = time_element.get_text(strip=True)
+
+    # Tickets & Status Regex Matcher
+    page_text = soup.get_text(separator=' ', strip=True)
+    tickets_regex = config.get('tickets_regex') or r'\((\d+)\s+dostępnych\)'
+    soldout_regex = config.get('sold_out_regex') or r'wyprzedane|brak biletów|brak w magazynie|sprzedaż zamknięta'
+
+    tickets_match = re.search(tickets_regex, page_text, re.IGNORECASE)
     
-    for el in event_elements:
-        try:
-            title_el = el.find('h3', class_=lambda c: c and 'event-card__title' in c)
-            title = title_el.text.strip() if title_el else "Nieznane wydarzenie"
+    if tickets_match:
+        data["tickets_available"] = int(tickets_match.group(1))
+        data["status"] = "Bilety dostępne"
+    else:
+        if re.search(soldout_regex, page_text, re.IGNORECASE):
+            data["tickets_available"] = 0
+            data["status"] = "Wyprzedane"
             
-            date_el = el.find('div', class_=lambda c: c and 'event-card__date' in c)
-            date_info = date_el.text.strip() if date_el else "Unknown Date"
-            
-            link_el = el.find('a', class_=lambda c: c and 'event-card__cta' in c)
-            link = link_el['href'] if link_el and 'href' in link_el.attrs else ""
-            
-            img_el = el.find('img')
-            image_url = img_el['src'] if img_el and 'src' in img_el.attrs else None
-            
-            if link and not link.startswith('http'):
-                link = DOMAIN_URL.rstrip('/') + '/' + link.lstrip('/')
-                
-            if title and len(title) > 3 and link:
-                event_id = hashlib.md5(link.encode('utf-8')).hexdigest()
-                
-                logger.info(f"Wydarzenie: '{title}' | Znaleziony URL obrazka: {image_url}")
-
-                # Fetch details page to get tickets
-                logger.info(f"Fetching details for {title}...")
-                detail_html = get_page_with_retry(link)
-                available_places = extract_tickets(detail_html)
-                
-                events.append({
-                    'id': event_id,
-                    'title': title,
-                    'link': link,
-                    'date_info': date_info,
-                    'available_places': available_places,
-                    'image_url': image_url
-                })
-                # Prevent rate limiting
-                time.sleep(1)
-        except Exception as e:
-            logger.debug(f"Skipping element due to parsing error: {e}")
-            continue
-
-    unique_events = {e['id']: e for e in events}.values()
-    return list(unique_events)
+    return data
 
 def run_scraper(is_first_run=False):
     logger.info("Starting scrape run...")
-    html = get_page_with_retry(BASE_URL)
     
-    if not html:
-        logger.error("Skipping run due to fetch failure.")
-        return
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    sources = [dict(row) for row in cursor.execute("SELECT * FROM scraping_sources WHERE is_active = 1").fetchall()]
+    conn.close()
 
-    events = parse_events(html)
-    logger.info(f"Found {len(events)} events.")
+    all_events = []
+
+    for source in sources:
+        list_url = source['list_url']
+        logger.info(f"=== Rozpoczynam pobieranie z źródła: {source['name']} ({list_url}) ===")
+        list_html = get_page_with_retry(list_url)
+        if not list_html:
+            logger.warning(f"Nie udało się pobrać listy z {list_url}")
+            continue
+
+        event_urls = get_event_urls(list_html, list_url, source.get('list_links_selector'))
+        if not event_urls:
+            logger.warning(f"Nie znaleziono żadnych wydarzeń na stronie {source['name']}.")
+            continue
+
+        logger.info(f"Znaleziono {len(event_urls)} potencjalnych wydarzeń. Analiza...")
+
+        for url in event_urls:
+            event_html = get_page_with_retry(url)
+            if not event_html:
+                continue
+
+            event_data = scrape_event_details(event_html, url, source)
+            title = event_data['title'] or "Nieznane wydarzenie"
+            image_url = event_data['image_url']
+            logger.info(f"Wydarzenie: '{title}' | Znaleziony URL obrazka: {image_url}")
+
+            event_id = hashlib.md5(url.encode('utf-8')).hexdigest()
+            date_info = f"{event_data['date'] or ''} {event_data['time'] or ''}".strip()
+            if not date_info:
+                date_info = "Unknown Date"
+
+            all_events.append({
+                'id': event_id,
+                'title': title,
+                'link': url,
+                'date_info': date_info,
+                'available_places': event_data['tickets_available'],
+                'image_url': image_url
+            })
+            time.sleep(1)
+
+    logger.info(f"Zakończono odpytywanie. Zaktualizowanych zostanie {len(all_events)} wydarzeń.")
     
-    for event in events:
+    for event in all_events:
         try:
             is_new, max_avail = update_event(
                 event['id'], 
