@@ -16,8 +16,8 @@ async function addSource(formData: FormData) {
   if (db) {
     const stmt = db.prepare(`
       INSERT INTO scraping_sources 
-      (name, list_url, list_links_selector, title_selector, date_selector, time_selector, image_selector, tickets_regex, sold_out_regex)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (name, list_url, list_links_selector, title_selector, date_selector, time_selector, image_selector, tickets_regex, sold_out_regex, ntfy_url, ntfy_template)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
@@ -29,7 +29,9 @@ async function addSource(formData: FormData) {
       formData.get('time_selector') as string,
       formData.get('image_selector') as string,
       formData.get('tickets_regex') as string,
-      formData.get('sold_out_regex') as string
+      formData.get('sold_out_regex') as string,
+      formData.get('ntfy_url') as string,
+      formData.get('ntfy_template') as string
     );
     revalidatePath('/admin');
   }
@@ -150,6 +152,20 @@ export default async function AdminPage({
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Regex na ilość biletów w tekście</label>
               <input type="text" name="tickets_regex" placeholder='np. \((\d+)\s+dostępnych\)' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+            </div>
+            
+            <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+              <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-3">Customizacja Powiadomień (Opcjonalne)</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Indywidualny kanał NTFY (URL)</label>
+                  <input type="url" name="ntfy_url" placeholder="https://ntfy.sh/twoj-kanal-miejscowki" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Szablon wiadomości ({'{title}'}, {'{available}'}, {'{max}'})</label>
+                  <input type="text" name="ntfy_template" placeholder="np. {title} ma dostępne {available} biletów!" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+                </div>
+              </div>
             </div>
             <button type="submit" className="w-full bg-blue-600 text-white font-medium py-2 rounded-lg hover:bg-blue-700 transition-colors">
               Zapisz źródło

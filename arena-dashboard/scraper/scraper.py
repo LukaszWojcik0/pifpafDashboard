@@ -152,7 +152,9 @@ def run_scraper(is_first_run=False):
                 'link': url,
                 'date_info': date_info,
                 'available_places': event_data['tickets_available'],
-                'image_url': image_url
+                'image_url': image_url,
+                'custom_ntfy_url': source.get('ntfy_url'),
+                'custom_ntfy_template': source.get('ntfy_template')
             })
             time.sleep(1)
 
@@ -169,17 +171,30 @@ def run_scraper(is_first_run=False):
                 event.get('image_url')
             )
             
-            # Alerting logic requested format
-            # title: nazwa wydarzenia
-            # opis: dostepna ilosc biletów: dostępne/max
-            
-            msg = f"dostepna ilosc biletów: {event['available_places']}/{max_avail}"
             title = event['title']
+            custom_url = event.get('custom_ntfy_url')
+            custom_template = event.get('custom_ntfy_template')
             
-            if is_new and not is_first_run:
-                send_alert(title, msg, tags=["new", "tada"])
-            elif not is_first_run and event['available_places'] > 0 and event['available_places'] < 5:
-                 send_alert(title, msg, tags=["warning"])
+            # Custom msg logic
+            if custom_template:
+                msg = custom_template.replace('{title}', str(title)).replace('{available}', str(event['available_places'])).replace('{max}', str(max_avail))
+            else:
+                msg = f"dostepna ilosc biletów: {event['available_places']}/{max_avail}"
+            
+            # Wysyłka powiadomienia
+            if not is_first_run:
+                should_alert = is_new or (event['available_places'] > 0 and event['available_places'] < 5)
+                if should_alert:
+                    if custom_url:
+                        try:
+                            tags = "new,tada" if is_new else "warning"
+                            headers = {"Title": title.encode('utf-8'), "Click": event['link'], "Tags": tags}
+                            requests.post(custom_url, data=msg.encode('utf-8'), headers=headers, timeout=5)
+                        except Exception as e:
+                            logger.error(f"Błąd wysyłania custom ntfy dla {title}: {e}")
+                    else:
+                        # Fallback to default alerts.py logic
+                        send_alert(title, msg, tags=["new", "tada"] if is_new else ["warning"])
         except Exception as e:
             logger.error(f"Error updating event {event['title']}: {e}")
             

@@ -43,9 +43,16 @@ if (process.env.npm_lifecycle_event !== 'build') {
         image_selector TEXT,
         tickets_regex TEXT,
         sold_out_regex TEXT,
-        is_active INTEGER DEFAULT 1
+        is_active INTEGER DEFAULT 1,
+        ntfy_url TEXT,
+        ntfy_template TEXT
       );
     `);
+    
+    // Migracje dla istniejących baz
+    try { db.exec('ALTER TABLE scraping_sources ADD COLUMN ntfy_url TEXT'); } catch(e) {}
+    try { db.exec('ALTER TABLE scraping_sources ADD COLUMN ntfy_template TEXT'); } catch(e) {}
+
   } catch (error) {
     console.error("Błąd połączenia z bazą danych:", error);
     db = null; // Upewniamy się, że db jest null w razie błędu

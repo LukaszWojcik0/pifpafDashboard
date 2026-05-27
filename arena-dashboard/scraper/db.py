@@ -70,6 +70,17 @@ def init_db():
             is_active INTEGER DEFAULT 1
         )
     ''')
+    
+    # Add custom ntfy columns to existing scraping_sources table if not exists
+    try:
+        cursor.execute('ALTER TABLE scraping_sources ADD COLUMN ntfy_url TEXT')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute('ALTER TABLE scraping_sources ADD COLUMN ntfy_template TEXT')
+    except sqlite3.OperationalError:
+        pass
+
     cursor.execute("SELECT count(*) FROM scraping_sources")
     if cursor.fetchone()[0] == 0:
         logger.info("Brak źródeł skrapowania. Inicjowanie domyślnym źródłem: Arena Walki.")
