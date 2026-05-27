@@ -13,11 +13,12 @@ async function addSource(formData: FormData) {
   const session = await getSession();
   if (!session) throw new Error('Brak uprawnień');
 
+  const is_api = parseInt(formData.get('is_api') as string || '0', 10);
   if (db) {
     const stmt = db.prepare(`
       INSERT INTO scraping_sources 
-      (name, list_url, list_links_selector, title_selector, date_selector, time_selector, image_selector, tickets_regex, sold_out_regex, ntfy_url, ntfy_template)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (name, list_url, list_links_selector, title_selector, date_selector, time_selector, image_selector, tickets_regex, sold_out_regex, ntfy_url, ntfy_template, is_api)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
@@ -31,7 +32,8 @@ async function addSource(formData: FormData) {
       formData.get('tickets_regex') as string,
       formData.get('sold_out_regex') as string,
       formData.get('ntfy_url') as string,
-      formData.get('ntfy_template') as string
+      formData.get('ntfy_template') as string,
+      is_api
     );
     revalidatePath('/admin');
   }
@@ -118,40 +120,63 @@ export default async function AdminPage({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700">
           <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Dodaj nowe źródło wydarzeń</h2>
+          
+          <details className="mb-6 bg-blue-50 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-800">
+            <summary className="p-3 font-semibold text-blue-800 dark:text-blue-300 cursor-pointer">ℹ️ Jak pobierać dane z API (PlayAir i podobne)? Kliknij!</summary>
+            <div className="p-3 text-sm text-blue-900 dark:text-blue-200 space-y-2 border-t border-blue-200 dark:border-blue-800">
+              <p>1. Wejdź na stronę docelową w przeglądarce (np. PlayAir).</p>
+              <p>2. Wciśnij <strong>F12</strong> i przejdź do zakładki <strong>Sieć (Network)</strong>. Zaznacz filtr <strong>Fetch/XHR</strong>.</p>
+              <p>3. Odśwież stronę. Poszukaj zapytania po lewej, które ma w nazwie <code>events</code> lub podobnie i zwraca listę.</p>
+              <p>4. Skopiuj jego <strong>Adres URL (Request URL)</strong> i wklej jako <i>Adres URL źródła</i> poniżej.</p>
+              <p>5. Kliknij na to zapytanie, przejdź do zakładki <strong>Odpowiedź (Response)</strong>, skopiuj cały tekst i wklej na dole strony do <i>Kreatora JSON</i>.</p>
+            </div>
+          </details>
+
           <form action={addSource} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nazwa (np. Miejscówka 2)</label>
               <input type="text" name="name" required className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Adres URL z listą wydarzeń</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Typ pobierania danych</label>
+              <select name="is_api" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                  <option value="0">🌐 Tradycyjna Strona HTML (Selektory CSS)</option>
+                  <option value="1">⚙️ Interfejs API (Ścieżki JSON)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Adres URL (HTML lub API)</label>
               <input type="url" name="list_url" required placeholder="https://..." className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Selektor CSS dla linków do detali</label>
-              <input type="text" name="list_links_selector" placeholder='np. a.event-card' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">HTML: Linki wydarzeń / JSON: Ścieżka do tablicy</label>
+              <input type="text" name="list_links_selector" placeholder='np. a.event-card LUB data.items' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Selektor CSS tytułu (na stronie detali)</label>
-              <input type="text" name="title_selector" placeholder="np. h1.title" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tytuł (CSS LUB Klucz JSON)</label>
+              <input type="text" name="title_selector" placeholder="np. h1.title LUB name" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Selektor Daty</label>
-                <input type="text" name="date_selector" placeholder='np. .event-date' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data</label>
+                <input type="text" name="date_selector" placeholder='np. .date LUB startDate' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Selektor Czasu</label>
-                <input type="text" name="time_selector" placeholder='np. .event-time' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Czas</label>
+                <input type="text" name="time_selector" placeholder='np. .time LUB startTime' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Selektor Obrazka (img src lub meta content)</label>
-              <input type="text" name="image_selector" placeholder='np. meta[property="og:image"]' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Obrazek (CSS LUB Klucz JSON)</label>
+              <input type="text" name="image_selector" placeholder='np. meta[property="og:image"] LUB coverUrl' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Regex na ilość biletów w tekście</label>
-              <input type="text" name="tickets_regex" placeholder='np. \((\d+)\s+dostępnych\)' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Bilety (Regex HTML LUB Klucz JSON)</label>
+              <input type="text" name="tickets_regex" placeholder='np. \((\d+) dostępnych\) LUB stock.available' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Wyprzedane Regex (HTML) LUB Klucz ID Wydarzenia (JSON)</label>
+              <input type="text" name="sold_out_regex" placeholder='np. wyprzedane LUB id' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
             </div>
             
             <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
@@ -182,7 +207,7 @@ export default async function AdminPage({
                 <button type="submit" className="text-red-500 hover:text-red-700 text-sm font-medium p-1">Usuń</button>
               </form>
               <div className="flex justify-between items-start mb-2">
-                <h3 className="font-bold text-lg text-gray-900 dark:text-white">{src.name} {src.is_active ? '🟢' : '🔴'}</h3>
+                <h3 className="font-bold text-lg text-gray-900 dark:text-white">{src.name} {src.is_active ? '🟢' : '🔴'} {src.is_api === 1 ? '⚙️ API' : '🌐 HTML'}</h3>
               </div>
               <a href={src.list_url} target="_blank" rel="noreferrer" className="text-blue-500 text-sm hover:underline break-all mb-4 block pr-12">
                 {src.list_url}

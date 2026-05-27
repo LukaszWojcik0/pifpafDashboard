@@ -6,6 +6,7 @@ import time
 import re
 import sqlite3
 from urllib.parse import urljoin
+import json
 from db import update_event, get_connection
 from alerts import send_alert
 
@@ -118,6 +119,68 @@ def run_scraper(is_first_run=False):
 
     for source in sources:
         list_url = source['list_url']
+        is_api = source.get('is_api') == 1
+        
+        if is_api:
+            logger.info(f"=== Rozpoczynam pobieranie (API JSON) z: {source['name']} ({list_url}) ===")
+            response_text = get_page_with_retry(list_url)
+            if not response_text:
+                logger.warning(f"Nie udało się pobrać danych API: {list_url}")
+                continue
+            
+            try:
+                api_data = json.loads(response_text)
+            except Exception as e:
+                logger.error(f"Nie udało się sparsować JSON z {list_url}: {e}")
+                continue
+                
+            def get_by_path(d, path_str):
+                if not path_str: return d
+                keys = path_str.replace('[', '.').replace(']', '').split('.')
+                val = d
+                try:
+                    for k in keys:
+                        if not k: continue
+                        if isinstance(val, list):
+                            val = val[int(k)]
+                        else:
+                            val = val.get(k)
+                    return val
+                except Exception:
+                    return None
+
+            events_list_path = source.get('list_links_selector')
+            events_array = get_by_path(api_data, events_list_path) if events_list_path else api_data
+            
+            if not isinstance(events_array, list):
+                events_array = [events_array] if isinstance(events_array, dict) else []
+                    
+            logger.info(f"Znaleziono {len(events_array)} wydarzeń w JSON.")
+            
+            for evt in events_array:
+                title = get_by_path(evt, source.get('title_selector')) or "Nieznane Wydarzenie API"
+                date = get_by_path(evt, source.get('date_selector'))
+                time_val = get_by_path(evt, source.get('time_selector'))
+                image = get_by_path(evt, source.get('image_selector'))
+                tickets = get_by_path(evt, source.get('tickets_regex'))
+                
+                evt_url_id = get_by_path(evt, source.get('sold_out_regex'))
+                evt_url = evt_url_id if str(evt_url_id).startswith('http') else f"{list_url}#{evt_url_id or hashlib.md5(str(title).encode()).hexdigest()}"
+                    
+                tickets_available = int(tickets) if tickets is not None and str(tickets).isdigit() else 0
+                
+                all_events.append({
+                    'id': hashlib.md5(str(evt_url).encode('utf-8')).hexdigest(),
+                    'title': str(title),
+                    'link': str(evt_url),
+                    'date_info': f"{date or ''} {time_val or ''}".strip() or "Brak daty",
+                    'available_places': tickets_available,
+                    'image_url': str(image) if image else None,
+                    'custom_ntfy_url': source.get('ntfy_url'),
+                    'custom_ntfy_template': source.get('ntfy_template')
+                })
+            continue # Omijamy HTMLowe parsowanie poniżej dla tego źródła!
+
         logger.info(f"=== Rozpoczynam pobieranie z źródła: {source['name']} ({list_url}) ===")
         list_html = get_page_with_retry(list_url)
         if not list_html:

@@ -45,13 +45,15 @@ if (process.env.npm_lifecycle_event !== 'build') {
         sold_out_regex TEXT,
         is_active INTEGER DEFAULT 1,
         ntfy_url TEXT,
-        ntfy_template TEXT
+        ntfy_template TEXT,
+        is_api INTEGER DEFAULT 0
       );
     `);
     
     // Migracje dla istniejących baz
     try { db.exec('ALTER TABLE scraping_sources ADD COLUMN ntfy_url TEXT'); } catch(e) {}
     try { db.exec('ALTER TABLE scraping_sources ADD COLUMN ntfy_template TEXT'); } catch(e) {}
+    try { db.exec('ALTER TABLE scraping_sources ADD COLUMN is_api INTEGER DEFAULT 0'); } catch(e) {}
 
   } catch (error) {
     console.error("Błąd połączenia z bazą danych:", error);

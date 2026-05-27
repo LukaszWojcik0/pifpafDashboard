@@ -67,7 +67,8 @@ def init_db():
             image_selector TEXT,
             tickets_regex TEXT,
             sold_out_regex TEXT,
-            is_active INTEGER DEFAULT 1
+            is_active INTEGER DEFAULT 1,
+            is_api INTEGER DEFAULT 0
         )
     ''')
     
@@ -78,6 +79,11 @@ def init_db():
         pass
     try:
         cursor.execute('ALTER TABLE scraping_sources ADD COLUMN ntfy_template TEXT')
+    except sqlite3.OperationalError:
+        pass
+        
+    try:
+        cursor.execute('ALTER TABLE scraping_sources ADD COLUMN is_api INTEGER DEFAULT 0')
     except sqlite3.OperationalError:
         pass
 
