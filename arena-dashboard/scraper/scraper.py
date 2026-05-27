@@ -168,8 +168,24 @@ def run_scraper(is_first_run=False):
                 image = get_by_path(evt, source.get('image_selector'))
                 tickets = get_by_path(evt, source.get('tickets_regex'))
                 
+                if date and isinstance(date, str) and 'T' in date:
+                    date = date.split('T')[0]
+                if time_val and isinstance(time_val, str) and 'T' in time_val:
+                    time_val = time_val.split('T')[1][:5]
+                    
+                if image and not str(image).startswith('http'):
+                    if "playair.pro" in list_url:
+                        image = f"https://api.playair.pro/files/production/{image}/image.jpg"
+
                 evt_url_id = get_by_path(evt, source.get('sold_out_regex'))
-                evt_url = evt_url_id if str(evt_url_id).startswith('http') else f"{list_url}#{evt_url_id or hashlib.md5(str(title).encode()).hexdigest()}"
+                
+                if str(evt_url_id).startswith('http'):
+                    evt_url = evt_url_id
+                else:
+                    if "playair.pro" in list_url:
+                        evt_url = f"https://playair.pro/event/{evt_url_id}"
+                    else:
+                        evt_url = f"{list_url}#{evt_url_id or hashlib.md5(str(title).encode()).hexdigest()}"
                     
                 tickets_available = int(tickets) if tickets is not None and str(tickets).isdigit() else 0
                 
