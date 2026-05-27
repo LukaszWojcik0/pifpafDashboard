@@ -16,7 +16,6 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 # nie psując samego formatu wyjściowego (logi pójdą na stderr/stdout z prefixem)
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-BASE_URL = "https://arenawalki.pl/gry-otwarte/"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -52,6 +51,30 @@ def init_db(db_path: str = DB_FILE):
             logging.info("Dodano kolumnę 'image_url' do tabeli 'events' dla istniejącej bazy danych.")
         except sqlite3.OperationalError:
             pass  # Column already exists
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS scraping_sources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                list_url TEXT NOT NULL,
+                list_links_selector TEXT,
+                title_selector TEXT,
+                date_selector TEXT,
+                time_selector TEXT,
+                image_selector TEXT,
+                tickets_regex TEXT,
+                sold_out_regex TEXT,
+                is_active INTEGER DEFAULT 1
+            )
+        ''')
+        cursor.execute("SELECT count(*) FROM scraping_sources")
+        if cursor.fetchone()[0] == 0:
+            logging.info("Brak źródeł skrapowania. Inicjowanie domyślnym źródłem: Arena Walki.")
+            cursor.execute('''
+                INSERT INTO scraping_sources 
+                (name, list_url, list_links_selector, title_selector, date_selector, time_selector, image_selector, tickets_regex, sold_out_regex)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', ('Arena Walki', 'https://arenawalki.pl/gry-otwarte/', 'a[href*="/produkt/"], a[href*="/wydarzenie/"]', 'h1', '[class*="date"], [class*="data"]', '[class*="time"], [class*="czas"], [class*="godzina"]', 'meta[property="og:image"], .wp-post-image, .woocommerce-product-gallery__image img', r'\((\d+)\s+dostępnych\)', r'wyprzedane|brak biletów|brak w magazynie|sprzedaż zamknięta'))
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS snapshots (
@@ -174,7 +197,7 @@ def save_snapshot(conn: sqlite3.Connection, event_id: int, available: Optional[i
     ''', (event_id, available, now))
     conn.commit()
 
-def get_event_urls(session: requests.Session, list_url: str) -> List[str]:
+def get_event_urls(session: requests.Session, list_url: str, link_selector: str = None) -> List[str]:
     """
     Pobiera listę adresów URL poszczególnych wydarzeń ze strony głównej.
     """
@@ -188,19 +211,25 @@ def get_event_urls(session: requests.Session, list_url: str) -> List[str]:
     soup = BeautifulSoup(response.text, 'html.parser')
     event_urls = set()
 
-    for link in soup.find_all('a', href=True):
-        href = link['href']
-        text = link.get_text(separator=' ', strip=True).lower()
-        
-        if "dołącz" in text or "kup" in text or "bilet" in text or "/produkt/" in href or "/wydarzenie/" in href:
-            full_url = urljoin(list_url, href)
-            if full_url != list_url:
-                event_urls.add(full_url)
+    try:
+        links_elements = soup.select(link_selector) if link_selector else soup.find_all('a', href=True)
+        for link in links_elements:
+            if not link.has_attr('href'):
+                continue
+            href = link['href']
+            text = link.get_text(separator=' ', strip=True).lower()
+            
+            # Dodatkowy fallback logiki tekstowej, jeśli selektor był pusty
+            if link_selector or "dołącz" in text or "kup" in text or "bilet" in text or "/produkt/" in href or "/wydarzenie/" in href:
+                full_url = urljoin(list_url, href)
+                if full_url != list_url:
+                    event_urls.add(full_url)
+    except Exception as e:
+        logging.error(f"Błąd przetwarzania selektora linków: {e}")
 
     return list(event_urls)
 
-
-def scrape_event_details(session: requests.Session, event_url: str) -> Optional[Dict]:
+def scrape_event_details(session: requests.Session, event_url: str, config: Dict) -> Optional[Dict]:
     """
     Wchodzi pod adres URL wydarzenia i wyciąga niezbędne informacje.
     """
@@ -223,44 +252,49 @@ def scrape_event_details(session: requests.Session, event_url: str) -> Optional[
         "image_url": None
     }
 
-    title_element = soup.find('h1')
+    # Title
+    title_element = soup.select_one(config.get('title_selector')) if config.get('title_selector') else soup.find('h1')
     if title_element:
         data["title"] = title_element.get_text(strip=True)
 
-    # Scrape image URL
-    og_image_meta = soup.find('meta', property='og:image')
-    if og_image_meta and og_image_meta.get('content'):
-        data['image_url'] = og_image_meta['content']
-        logging.info(f"Znaleziono obrazek (og:image) dla {event_url}: {data['image_url']}")
+    # Image
+    if config.get('image_selector'):
+        for selector in config['image_selector'].split(','):
+            img_element = soup.select_one(selector.strip())
+            if img_element:
+                if img_element.name == 'meta' and img_element.get('content'):
+                    data['image_url'] = img_element['content']
+                    break
+                elif img_element.name == 'img' and img_element.get('src'):
+                    data['image_url'] = urljoin(event_url, img_element['src'])
+                    break
     else:
-        # Fallback to finding a prominent image on the page
-        image_element = soup.select_one('.wp-post-image, .woocommerce-product-gallery__image img')
-        if image_element and image_element.get('src'):
-            data['image_url'] = urljoin(event_url, image_element['src'])
-            logging.info(f"Znaleziono obrazek (img tag) dla {event_url}: {data['image_url']}")
-        else:
-            logging.warning(f"Nie znaleziono obrazka dla {event_url}")
+        og_image_meta = soup.find('meta', property='og:image')
+        if og_image_meta and og_image_meta.get('content'):
+            data['image_url'] = og_image_meta['content']
 
-    date_element = soup.find(class_=re.compile(r'date|data', re.I))
+    # Date
+    date_element = soup.select_one(config.get('date_selector')) if config.get('date_selector') else soup.find(class_=re.compile(r'date|data', re.I))
     if date_element:
         data["date"] = date_element.get_text(strip=True)
 
-    time_element = soup.find(class_=re.compile(r'time|czas|godzina', re.I))
+    # Time
+    time_element = soup.select_one(config.get('time_selector')) if config.get('time_selector') else soup.find(class_=re.compile(r'time|czas|godzina', re.I))
     if time_element:
         data["time"] = time_element.get_text(strip=True)
 
+    # Tickets & Status Regex Matcher
     page_text = soup.get_text(separator=' ', strip=True)
-    tickets_match = re.search(r'\((\d+)\s+dostępnych\)', page_text, re.IGNORECASE)
+    tickets_regex = config.get('tickets_regex') or r'\((\d+)\s+dostępnych\)'
+    soldout_regex = config.get('sold_out_regex') or r'wyprzedane|brak biletów|brak w magazynie|sprzedaż zamknięta'
+
+    tickets_match = re.search(tickets_regex, page_text, re.IGNORECASE)
     
     if tickets_match:
         data["tickets_available"] = int(tickets_match.group(1))
         data["status"] = "Bilety dostępne"
     else:
-        page_text_lower = page_text.lower()
-        if "sprzedaż zamknięta" in page_text_lower:
-            data["tickets_available"] = 0
-            data["status"] = "Sprzedaż zamknięta"
-        elif "wyprzedane" in page_text_lower or "brak biletów" in page_text_lower or "brak w magazynie" in page_text_lower:
+        if re.search(soldout_regex, page_text, re.IGNORECASE):
             data["tickets_available"] = 0
             data["status"] = "Wyprzedane"
         else:
@@ -269,29 +303,36 @@ def scrape_event_details(session: requests.Session, event_url: str) -> Optional[
 
     return data
 
-
 def scrape_arena_events() -> List[Dict]:
     """
     Główna funkcja orkiestrująca scraper. Łączy pozyskiwanie URL-i oraz wyciąganie detali.
     """
+    all_events_data = []
     with requests.Session() as session:
         session.headers.update(HEADERS)
         
-        logging.info(f"Rozpoczynam pobieranie linków do wydarzeń z: {BASE_URL}")
-        event_urls = get_event_urls(session, BASE_URL)
-        
-        if not event_urls:
-            logging.warning("Nie znaleziono żadnych wydarzeń. Sprawdź selektory w funkcji get_event_urls().")
-            return []
+        sources = []
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            sources = [dict(row) for row in cursor.execute("SELECT * FROM scraping_sources WHERE is_active = 1").fetchall()]
+
+        for source in sources:
+            list_url = source['list_url']
+            logging.info(f"=== Rozpoczynam pobieranie z źródła: {source['name']} ({list_url}) ===")
             
-        logging.info(f"Znaleziono {len(event_urls)} potencjalnych wydarzeń. Rozpoczynam parsowanie szczegółów...")
-        
-        all_events_data = []
-        
-        for url in event_urls:
-            event_data = scrape_event_details(session, url)
-            if event_data:
-                all_events_data.append(event_data)
+            event_urls = get_event_urls(session, list_url, source.get('list_links_selector'))
+            
+            if not event_urls:
+                logging.warning(f"Nie znaleziono żadnych wydarzeń na stronie {source['name']}.")
+                continue
+                
+            logging.info(f"Znaleziono {len(event_urls)} potencjalnych wydarzeń na stronie {source['name']}. Analiza...")
+            
+            for url in event_urls:
+                event_data = scrape_event_details(session, url, source)
+                if event_data:
+                    all_events_data.append(event_data)
                 
         return all_events_data
 

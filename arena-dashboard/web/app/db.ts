@@ -31,6 +31,20 @@ if (process.env.npm_lifecycle_event !== 'build') {
         username TEXT NOT NULL,
         expires_at DATETIME NOT NULL
       );
+      
+      CREATE TABLE IF NOT EXISTS scraping_sources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        list_url TEXT NOT NULL,
+        list_links_selector TEXT,
+        title_selector TEXT,
+        date_selector TEXT,
+        time_selector TEXT,
+        image_selector TEXT,
+        tickets_regex TEXT,
+        sold_out_regex TEXT,
+        is_active INTEGER DEFAULT 1
+      );
     `);
   } catch (error) {
     console.error("Błąd połączenia z bazą danych:", error);
