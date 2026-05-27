@@ -59,13 +59,13 @@ export default function SelectorBuilder() {
       />
       
       {html && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="border border-blue-300 dark:border-blue-700 p-4 rounded-lg bg-white dark:bg-gray-800 overflow-auto cursor-crosshair shadow-sm" onClick={handlePreviewClick}>
+        <div className="flex flex-col-reverse md:flex-row gap-6 items-start relative">
+          <div className="flex-1 border border-blue-300 dark:border-blue-700 p-4 rounded-lg bg-white dark:bg-gray-800 overflow-auto cursor-crosshair shadow-sm w-full" onClick={handlePreviewClick}>
             <p className="text-xs text-blue-500 font-bold mb-3 uppercase tracking-wide border-b border-blue-100 dark:border-blue-800 pb-2">🎯 Kliknij w element poniżej:</p>
-            <div dangerouslySetInnerHTML={{ __html: html }} className="pointer-events-auto" />
+            <div dangerouslySetInnerHTML={{ __html: html }} className="pointer-events-auto [&_svg]:max-w-[2.5rem] [&_svg]:max-h-[2.5rem] [&_svg]:inline-block" />
           </div>
           
-          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col justify-center shadow-sm">
+          <div className="w-full md:w-1/3 sticky top-4 bg-white dark:bg-gray-800 p-5 rounded-xl border border-blue-200 dark:border-blue-800 shadow-md z-10 transition-all">
             <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Wygenerowany selektor (skopiuj do formularza):</p>
             <code className="block p-4 bg-gray-100 dark:bg-gray-900 rounded-lg font-mono text-sm break-all text-blue-600 dark:text-blue-400 border border-gray-200 dark:border-gray-700 selection:bg-blue-200">
               {selectedSelector || 'Wybierz element z podglądu obok...'}
