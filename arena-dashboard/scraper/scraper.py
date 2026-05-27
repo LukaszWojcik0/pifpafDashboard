@@ -13,6 +13,17 @@ from alerts import send_alert
 
 logger = logging.getLogger(__name__)
 
+import unicodedata
+def normalize_playair_string(text):
+    if not text: return ""
+    text = str(text).lower()
+    replacements = {'ą':'a', 'ć':'c', 'ę':'e', 'ł':'l', 'ń':'n', 'ó':'o', 'ś':'s', 'ź':'z', 'ż':'z'}
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8')
+    text = re.sub(r'[^a-z0-9]+', '-', text).strip('-')
+    return text
+
 def get_page_with_retry(url, retries=3, backoff_factor=1):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     for i in range(retries):
@@ -173,9 +184,12 @@ def run_scraper(is_first_run=False):
                 if time_val and isinstance(time_val, str) and 'T' in time_val:
                     time_val = time_val.split('T')[1][:5]
                     
-                if image and not str(image).startswith('http'):
-                    if "playair.pro" in list_url:
-                        image = f"https://api.playair.pro/files/production/{image}/image.jpg"
+                if "playair.pro" in list_url:
+                    img_id = get_by_path(evt, "additionalPicturesIds[0]") or get_by_path(evt, "pictureId")
+                    if img_id:
+                        image = f"https://api.playair.pro/files/production/{img_id}/image"
+                elif image and not str(image).startswith('http'):
+                    image = urljoin(list_url, str(image))
 
                 evt_url_id = get_by_path(evt, source.get('sold_out_regex'))
                 
@@ -183,7 +197,10 @@ def run_scraper(is_first_run=False):
                     evt_url = evt_url_id
                 else:
                     if "playair.pro" in list_url:
-                        evt_url = f"https://playair.pro/event/{evt_url_id}"
+                        state = normalize_playair_string(get_by_path(evt, "arena.address.state"))
+                        city = normalize_playair_string(get_by_path(evt, "arena.address.city"))
+                        alias = get_by_path(evt, "arena.alias") or "arena"
+                        evt_url = f"https://playair.pro/arena/{state}/{city}/{alias}/event/{evt_url_id}"
                     else:
                         evt_url = f"{list_url}#{evt_url_id or hashlib.md5(str(title).encode()).hexdigest()}"
                     
