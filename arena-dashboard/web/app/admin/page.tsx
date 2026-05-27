@@ -4,6 +4,7 @@ import db from '../db';
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import { getEvents } from '../queries';
+import SelectorBuilder from '../../components/SelectorBuilder';
 
 export const dynamic = 'force-dynamic';
 
@@ -173,6 +174,10 @@ export default async function AdminPage({
               <p className="text-xs text-gray-500 font-mono">Tytuł: {src.title_selector || 'Domyślny'}</p>
             </div>
           ))}
+        </div>
+        
+        <div className="lg:col-span-3">
+          <SelectorBuilder />
         </div>
       </div>
       )}

@@ -126,8 +126,8 @@ def run_scraper(is_first_run=False):
 
         event_urls = get_event_urls(list_html, list_url, source.get('list_links_selector'))
         if not event_urls:
-            logger.warning(f"Nie znaleziono żadnych wydarzeń na stronie {source['name']}.")
-            continue
+            logger.info(f"Nie znaleziono pod-linków do wydarzeń na stronie {source['name']}. Próba analizy wskazanego URL bezpośrednio jako pojedyncze wydarzenie...")
+            event_urls = [list_url]
 
         logger.info(f"Znaleziono {len(event_urls)} potencjalnych wydarzeń. Analiza...")
 
