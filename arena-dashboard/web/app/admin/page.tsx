@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import db from '../db';
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
+import { getEvents } from '../queries';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +41,13 @@ async function deleteEvent(formData: FormData) {
 
   const id = formData.get('id');
   if (db && id) {
-    db.prepare('DELETE FROM snapshots WHERE event_id = ?').run(id);
+    try {
+      db.prepare('DELETE FROM snapshots WHERE event_id = ?').run(id);
+    } catch (e) {
+      try {
+        db.prepare('DELETE FROM event_snapshots WHERE event_id = ?').run(id);
+      } catch (err) {}
+    }
     db.prepare('DELETE FROM events WHERE id = ?').run(id);
     revalidatePath('/admin');
   }
@@ -76,7 +83,7 @@ export default async function AdminPage({
     if (currentTab === 'sources') {
       sources = db.prepare('SELECT * FROM scraping_sources ORDER BY id DESC').all();
     } else {
-      events = db.prepare('SELECT id, title, url, event_date FROM events ORDER BY last_seen DESC').all();
+      events = getEvents();
     }
   }
 
@@ -182,8 +189,8 @@ export default async function AdminPage({
                   <h3 className="font-medium text-gray-900 dark:text-white truncate">{evt.title || 'Brak tytułu'}</h3>
                   <div className="text-sm text-gray-500 dark:text-gray-400 mt-1 flex flex-col sm:flex-row sm:gap-4">
                     <span>Data: {evt.event_date || 'Brak'}</span>
-                    <a href={evt.url} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline truncate block max-w-full">
-                      {evt.url}
+                    <a href={evt.link} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline truncate block max-w-full">
+                      {evt.link}
                     </a>
                   </div>
                 </div>
