@@ -184,13 +184,6 @@ def run_scraper(is_first_run=False):
                 if time_val and isinstance(time_val, str) and 'T' in time_val:
                     time_val = time_val.split('T')[1][:5]
                     
-                if "playair.pro" in list_url:
-                    img_id = get_by_path(evt, "additionalPicturesIds[0]") or get_by_path(evt, "pictureId")
-                    if img_id:
-                        image = f"https://api.playair.pro/files/production/{img_id}/image"
-                elif image and not str(image).startswith('http'):
-                    image = urljoin(list_url, str(image))
-
                 evt_url_id = get_by_path(evt, source.get('sold_out_regex'))
                 
                 if str(evt_url_id).startswith('http'):
@@ -201,11 +194,37 @@ def run_scraper(is_first_run=False):
                         city = normalize_playair_string(get_by_path(evt, "arena.address.city"))
                         alias = get_by_path(evt, "arena.alias") or "arena"
                         evt_url = f"https://playair.pro/arena/{state}/{city}/{alias}/event/{evt_url_id}"
+                        
+                        img_id = get_by_path(evt, "additionalPicturesIds[0]") or get_by_path(evt, "pictureId")
+                        if img_id:
+                            image = f"https://api.playair.pro/files/production/{img_id}/image.jpg"
                     else:
                         evt_url = f"{list_url}#{evt_url_id or hashlib.md5(str(title).encode()).hexdigest()}"
                     
                 tickets_available = int(tickets) if tickets is not None and str(tickets).isdigit() else 0
                 
+                if "playair.pro" in list_url:
+                    # Dociągamy faktyczną liczbę zapisanych graczy!
+                    parts_url = f"https://api.playair.pro/api/event/{evt_url_id}/participants"
+                    parts_resp = get_page_with_retry(parts_url, retries=1)
+                    if parts_resp:
+                        try:
+                            parts_data = json.loads(parts_resp)
+                            if isinstance(parts_data, list):
+                                tickets_available = len(parts_data)
+                            elif isinstance(parts_data, dict) and 'content' in parts_data:
+                                tickets_available = len(parts_data['content'])
+                        except:
+                            pass
+
+                # Zgodnie z prośbą - po dodatkowe braki ze zdjęciami idziemy klasycznie na stronę HTML
+                if evt_url.startswith('http'):
+                    event_html = get_page_with_retry(evt_url, retries=1)
+                    if event_html:
+                        html_data = scrape_event_details(event_html, evt_url, source)
+                        if not image or "playair" not in list_url:
+                            image = html_data.get('image_url') or image
+
                 all_events.append({
                     'id': hashlib.md5(str(evt_url).encode('utf-8')).hexdigest(),
                     'title': str(title),

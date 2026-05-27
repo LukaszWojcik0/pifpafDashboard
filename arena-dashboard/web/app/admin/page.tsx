@@ -40,7 +40,7 @@ async function addSource(formData: FormData) {
     date_selector = 'startDate';
     time_selector = 'startDate';
     image_selector = 'pictureId';
-    tickets_regex = 'defaultData.playersLimit';
+    tickets_regex = ''; // Zostawiamy puste, scraper sam policzy zapisanych z endpointu API participants!
     sold_out_regex = 'id';
   }
 
