@@ -108,6 +108,15 @@ export default function SourceForm({ action }: { action: (formData: FormData) =>
         </div>
       </div>
 
+      <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+        <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-3">Autoryzacja / Nagłówki (Opcjonalne)</h3>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nagłówki HTTP (Format JSON)</label>
+          <textarea name="request_headers" placeholder='{"Authorization": "Bearer token...", "userId": "123"}' className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white font-mono text-xs h-24" />
+          <p className="text-xs text-gray-500 mt-1">Jeśli API (np. PlayAir) wymaga logowania, wklej tutaj nagłówki skopiowane z przeglądarki (zakładka Network) w formacie JSON.</p>
+        </div>
+      </div>
+
       <SubmitBtn />
       {preset === 'custom' && <div className="mt-8"><SelectorBuilder /></div>}
     </form>

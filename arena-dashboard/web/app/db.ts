@@ -46,7 +46,8 @@ if (process.env.npm_lifecycle_event !== 'build') {
         is_active INTEGER DEFAULT 1,
         ntfy_url TEXT,
         ntfy_template TEXT,
-        is_api INTEGER DEFAULT 0
+        is_api INTEGER DEFAULT 0,
+        request_headers TEXT
       );
     `);
     
@@ -54,6 +55,7 @@ if (process.env.npm_lifecycle_event !== 'build') {
     try { db.exec('ALTER TABLE scraping_sources ADD COLUMN ntfy_url TEXT'); } catch(e) {}
     try { db.exec('ALTER TABLE scraping_sources ADD COLUMN ntfy_template TEXT'); } catch(e) {}
     try { db.exec('ALTER TABLE scraping_sources ADD COLUMN is_api INTEGER DEFAULT 0'); } catch(e) {}
+    try { db.exec('ALTER TABLE scraping_sources ADD COLUMN request_headers TEXT'); } catch(e) {}
 
   } catch (error) {
     console.error("Błąd połączenia z bazą danych:", error);

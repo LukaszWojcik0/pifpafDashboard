@@ -24,8 +24,10 @@ def normalize_playair_string(text):
     text = re.sub(r'[^a-z0-9]+', '-', text).strip('-')
     return text
 
-def get_page_with_retry(url, retries=3, backoff_factor=1):
+def get_page_with_retry(url, retries=3, backoff_factor=1, custom_headers=None):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    if custom_headers:
+        headers.update(custom_headers)
     for i in range(retries):
         try:
             response = requests.get(url, headers=headers, timeout=10)
@@ -133,12 +135,19 @@ def run_scraper(is_first_run=False):
         list_url = source['list_url']
         is_api = source.get('is_api') == 1
         
+        custom_headers = None
+        if source.get('request_headers'):
+            try:
+                custom_headers = json.loads(source['request_headers'])
+            except Exception as e:
+                logger.error(f"Błąd parsowania nagłówków autoryzacyjnych dla {source['name']}: {e}")
+
         if is_api:
             if "{TODAY}" in list_url:
                 list_url = list_url.replace("{TODAY}", datetime.now().strftime('%Y-%m-%dT00:00:00.000Z'))
                 
             logger.info(f"=== Rozpoczynam pobieranie (API JSON) z: {source['name']} ({list_url}) ===")
-            response_text = get_page_with_retry(list_url)
+            response_text = get_page_with_retry(list_url, custom_headers=custom_headers)
             if not response_text:
                 logger.warning(f"Nie udało się pobrać danych API: {list_url}")
                 continue
@@ -204,22 +213,33 @@ def run_scraper(is_first_run=False):
                 tickets_available = int(tickets) if tickets is not None and str(tickets).isdigit() else 0
                 
                 if "playair.pro" in list_url:
-                    # Dociągamy faktyczną liczbę zapisanych graczy!
-                    parts_url = f"https://api.playair.pro/api/event/{evt_url_id}/participants"
-                    parts_resp = get_page_with_retry(parts_url, retries=1)
+                    # Dociągamy szczegółowe dane wydarzenia autoryzowanym kanałem
+                    parts_url = f"https://api.playair.pro/api/user-consent/{evt_url_id}"
+                    parts_resp = get_page_with_retry(parts_url, retries=1, custom_headers=custom_headers)
                     if parts_resp:
                         try:
                             parts_data = json.loads(parts_resp)
                             if isinstance(parts_data, list):
                                 tickets_available = len(parts_data)
-                            elif isinstance(parts_data, dict) and 'content' in parts_data:
-                                tickets_available = len(parts_data['content'])
+                            elif isinstance(parts_data, dict):
+                                tr = source.get('tickets_regex')
+                                if tr:
+                                    val = get_by_path(parts_data, tr)
+                                    if val is not None:
+                                        tickets_available = int(val)
+                                elif 'content' in parts_data:
+                                    tickets_available = len(parts_data['content'])
+                                else:
+                                    for k in ['registeredCount', 'participantsCount', 'count', 'playersCount']:
+                                        if k in parts_data:
+                                            tickets_available = int(parts_data[k])
+                                            break
                         except:
                             pass
 
                 # Zgodnie z prośbą - po dodatkowe braki ze zdjęciami idziemy klasycznie na stronę HTML
                 if evt_url.startswith('http'):
-                    event_html = get_page_with_retry(evt_url, retries=1)
+                    event_html = get_page_with_retry(evt_url, retries=1, custom_headers=custom_headers)
                     if event_html:
                         html_data = scrape_event_details(event_html, evt_url, source)
                         if not image or "playair" not in list_url:
@@ -238,7 +258,7 @@ def run_scraper(is_first_run=False):
             continue # Omijamy HTMLowe parsowanie poniżej dla tego źródła!
 
         logger.info(f"=== Rozpoczynam pobieranie z źródła: {source['name']} ({list_url}) ===")
-        list_html = get_page_with_retry(list_url)
+        list_html = get_page_with_retry(list_url, custom_headers=custom_headers)
         if not list_html:
             logger.warning(f"Nie udało się pobrać listy z {list_url}")
             continue
@@ -251,7 +271,7 @@ def run_scraper(is_first_run=False):
         logger.info(f"Znaleziono {len(event_urls)} potencjalnych wydarzeń. Analiza...")
 
         for url in event_urls:
-            event_html = get_page_with_retry(url)
+            event_html = get_page_with_retry(url, custom_headers=custom_headers)
             if not event_html:
                 continue
 

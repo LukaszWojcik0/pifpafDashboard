@@ -23,6 +23,7 @@ async function addSource(formData: FormData) {
   let image_selector = formData.get('image_selector') as string;
   let tickets_regex = formData.get('tickets_regex') as string;
   let sold_out_regex = formData.get('sold_out_regex') as string;
+  let request_headers = formData.get('request_headers') as string;
 
   if (preset === 'playair') {
     const playairUrl = formData.get('playair_url') as string;
@@ -47,8 +48,8 @@ async function addSource(formData: FormData) {
   if (db) {
     const stmt = db.prepare(`
       INSERT INTO scraping_sources 
-      (name, list_url, list_links_selector, title_selector, date_selector, time_selector, image_selector, tickets_regex, sold_out_regex, ntfy_url, ntfy_template, is_api)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (name, list_url, list_links_selector, title_selector, date_selector, time_selector, image_selector, tickets_regex, sold_out_regex, ntfy_url, ntfy_template, is_api, request_headers)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
@@ -63,7 +64,8 @@ async function addSource(formData: FormData) {
       sold_out_regex,
       formData.get('ntfy_url') as string,
       formData.get('ntfy_template') as string,
-      is_api
+      is_api,
+      request_headers
     );
     revalidatePath('/admin');
   }

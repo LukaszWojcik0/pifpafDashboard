@@ -68,7 +68,8 @@ def init_db():
             tickets_regex TEXT,
             sold_out_regex TEXT,
             is_active INTEGER DEFAULT 1,
-            is_api INTEGER DEFAULT 0
+            is_api INTEGER DEFAULT 0,
+            request_headers TEXT
         )
     ''')
     
@@ -84,6 +85,11 @@ def init_db():
         
     try:
         cursor.execute('ALTER TABLE scraping_sources ADD COLUMN is_api INTEGER DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute('ALTER TABLE scraping_sources ADD COLUMN request_headers TEXT')
     except sqlite3.OperationalError:
         pass
 
