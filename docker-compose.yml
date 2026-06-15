@@ -4,17 +4,25 @@ volumes:
   pifpaf-data:
   gluetun-data:
 
+networks:
+  cloudflare-net:
+    external: true
+
 services:
   vpn:
     image: qmcgaw/gluetun
-    container_name: gluetun
+    container_name: pifpaf-gluetun
     restart: always
     cap_add:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
-      - "${WEB_PORT:-8088}:3000/tcp" # Port do dashboardu jest teraz na kontenerze VPN
+      - "${WEB_PORT:-8088}:3000/tcp"
+    networks:
+      cloudflare-net:
+        aliases:
+          - pifpaf-origin
     volumes:
       - gluetun-data:/gluetun
     environment:
@@ -25,7 +33,7 @@ services:
       - SERVER_COUNTRIES=Poland
       - OPENVPN_PROTOCOL=udp
       - OPENVPN_ENDPOINT_PORT=1194
-      - FIREWALL_VPN_INPUT_PORTS=3000 # Zezwól na ruch przychodzący na porcie dashboardu
+      - FIREWALL_INPUT_PORTS=3000
       - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
       - TZ=Europe/Warsaw
 
@@ -43,7 +51,8 @@ services:
       - NTFY_URL=${NTFY_URL}
       - ALERT_ON_FIRST_RUN=${ALERT_ON_FIRST_RUN:-false}
     network_mode: "service:vpn"
-    depends_on: [vpn]
+    depends_on:
+      - vpn
 
   web:
     build:
@@ -57,18 +66,11 @@ services:
       - DATABASE_PATH=/data/app.db
       - HOSTNAME=0.0.0.0
     network_mode: "service:vpn"
-    depends_on: [vpn]
+    depends_on:
+      - vpn
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflare-tunnel
-    restart: unless-stopped
-    command: tunnel run
-    environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
