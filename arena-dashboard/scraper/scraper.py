@@ -38,187 +38,21 @@ EVENT_PATH_RE = re.compile(r'^/(?:produkt|wydarzenie|events)/[^/]', re.IGNORECAS
 TRACKING_QUERY_PREFIXES = ('utm_',)
 TRACKING_QUERY_KEYS = {'fbclid', 'gclid', 'mc_cid', 'mc_eid'}
 
+# Słownik przechowujący ostatnią widoczną liczbę biletów w pamięci
+last_known_tickets = {}
 
-@dataclass
-class TicketParseResult:
-    known: bool
-    value: int | None
-    status: str
-    reason: str | None = None
-
-
-@dataclass
-class ScrapeSummary:
-    sources: int = 0
-    found: int = 0
-    valid: int = 0
-    rejected: int = 0
-    created: int = 0
-    updated: int = 0
-    skipped: bool = False
-
-    def as_dict(self):
-        return {
-            'sources': self.sources,
-            'found': self.found,
-            'valid': self.valid,
-            'rejected': self.rejected,
-            'created': self.created,
-            'updated': self.updated,
-            'skipped': self.skipped,
-        }
-
-
-def normalize_playair_string(text):
-    if not text:
-        return ''
-    value = str(text).lower()
-    replacements = {'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z'}
-    for source, target in replacements.items():
-        value = value.replace(source, target)
-    value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('utf-8')
-    return re.sub(r'[^a-z0-9]+', '-', value).strip('-')
-
-
-def normalize_url(url, base_url):
-    joined = urljoin(base_url, (url or '').strip())
-    parsed = urlparse(joined)
-    scheme = (parsed.scheme or 'https').lower()
-    netloc = parsed.netloc.lower()
-    path = re.sub(r'/+', '/', parsed.path or '/')
-    if path != '/':
-        path = path.rstrip('/')
-    query_items = []
-    for key, value in parse_qsl(parsed.query, keep_blank_values=True):
-        lowered = key.lower()
-        if lowered in TRACKING_QUERY_KEYS or any(lowered.startswith(prefix) for prefix in TRACKING_QUERY_PREFIXES):
-            continue
-        query_items.append((key, value))
-    query = urlencode(sorted(query_items), doseq=True)
-    return urlunparse((scheme, netloc, path, '', query, ''))
-
-
-def is_supported_event_url(url):
-    return bool(EVENT_PATH_RE.search(urlparse(url).path))
-
-
-def event_id_for_url(url):
-    return hashlib.md5(url.encode('utf-8')).hexdigest()
-
-
-def is_antibot_page(html_content):
-    text = BeautifulSoup(html_content or '', 'html.parser').get_text(' ', strip=True).lower()
-    needles = [
-        'checking your browser',
-        'just a moment',
-        'captcha',
-        'cloudflare',
-        'access denied',
-        'enable javascript',
-        'verify you are human',
-    ]
-    return any(needle in text for needle in needles)
-
-
-def get_page_with_retry(url, retries=3, backoff_factor=1, custom_headers=None):
-    policy = build_request_policy(url)
-    return safe_get(
-        url,
-        retries=retries,
-        backoff_factor=backoff_factor,
-        custom_headers=custom_headers,
-        policy=policy,
-    )
-
-
-def safe_select(soup, selector, context):
-    if not selector:
-        return []
-    try:
-        return soup.select(selector)
-    except Exception as exc:
-        logger.warning('Invalid CSS selector for %s: %s', context, exc)
-        return []
-
-
-def safe_select_one(soup, selector, context):
-    if not selector:
-        return None
-    try:
-        return soup.select_one(selector)
-    except Exception as exc:
-        logger.warning('Invalid CSS selector for %s: %s', context, exc)
-        return None
-
-
-def get_event_urls(html_content, list_url, link_selector=None):
-    soup = BeautifulSoup(html_content or '', 'html.parser')
-    selected = safe_select(soup, link_selector, 'event links') if link_selector else []
-    default_candidates = soup.find_all('a', href=True)
-    event_urls = []
-    seen = set()
-
-    for link in list(selected) + list(default_candidates):
-        href = link.get('href')
-        if not href:
-            continue
-        normalized = normalize_url(href, list_url)
-        text = link.get_text(separator=' ', strip=True).lower()
-        keyword_match = any(keyword in text for keyword in ['dolacz', 'dołącz', 'kup', 'bilet'])
-        if not (is_supported_event_url(normalized) or (link_selector and keyword_match)):
-            continue
-        if normalized == normalize_url(list_url, list_url):
-            continue
-        if normalized not in seen:
-            seen.add(normalized)
-            event_urls.append(normalized)
-
-    return event_urls
-
-
-def parse_ticket_count(page_text, tickets_regex=None, soldout_regex=None):
-    tickets_pattern = tickets_regex or DEFAULT_TICKETS_REGEX
-    soldout_pattern = soldout_regex or DEFAULT_SOLD_OUT_REGEX
-
-    try:
-        tickets_match = re.search(tickets_pattern, page_text, re.IGNORECASE)
-    except re.error as exc:
-        return TicketParseResult(False, None, 'Nieznany', f'invalid tickets_regex: {exc}')
-
-    if tickets_match:
-        groups = [group for group in tickets_match.groups() if group is not None] or [tickets_match.group(0)]
-        raw_value = re.sub(r'\D+', '', groups[0])
-        if raw_value == '':
-            return TicketParseResult(False, None, 'Nieznany', 'tickets_regex matched without numeric group')
-        return TicketParseResult(True, int(raw_value), 'Bilety dostepne')
-
-    try:
-        if re.search(soldout_pattern, page_text, re.IGNORECASE):
-            return TicketParseResult(True, 0, 'Wyprzedane')
-    except re.error as exc:
-        return TicketParseResult(False, None, 'Nieznany', f'invalid sold_out_regex: {exc}')
-
-    return TicketParseResult(False, None, 'Nieznany', 'tickets_not_found')
-
-
-def first_text(soup, selector, fallback_regex, context):
-    element = safe_select_one(soup, selector, context) if selector else None
-    if not element and fallback_regex:
-        element = soup.find(class_=fallback_regex)
-    return element.get_text(strip=True) if element else None
-
-
-def first_image_url(soup, event_url, image_selector=None):
-    selectors = [selector.strip() for selector in (image_selector or '').split(',') if selector.strip()]
-    selectors.extend(['meta[property="og:image"]', '.wp-post-image', '.woocommerce-product-gallery__image img'])
-    for selector in selectors:
-        element = safe_select_one(soup, selector, 'image') if selector else None
-        if not element:
-            continue
-        if element.name == 'meta' and element.get('content'):
-            return normalize_url(element['content'], event_url)
-        if element.name == 'img' and element.get('src'):
-            return normalize_url(element['src'], event_url)
+def get_page_with_retry(url, retries=3, backoff_factor=1):
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    for i in range(retries):
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            return response.text
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Attempt {i+1} failed to fetch {url}: {e}")
+            if i < retries - 1:
+                time.sleep(backoff_factor * (2 ** i))
+    logger.error(f"Failed to fetch {url} after {retries} retries.")
     return None
 
 
@@ -455,118 +289,31 @@ def process_api_source(source, list_url, custom_headers, request_policy, summary
 
     for evt in events_array:
         try:
-            event = build_api_event(evt, source, list_url, custom_headers, request_policy)
-            save_event(event, summary, is_first_run)
-        except URLBlockedError as exc:
-            summary.rejected += 1
-            logger.warning('Rejected API event from %s: %s', source.get('name'), exc)
-        except Exception:
-            summary.rejected += 1
-            logger.exception('Failed to process API event from %s', source.get('name'))
-
-
-def process_html_source(source, list_url, custom_headers, request_policy, summary, is_first_run):
-    list_html = safe_get(list_url, custom_headers=custom_headers, policy=request_policy)
-    if not list_html:
-        logger.warning('Could not fetch list from %s', list_url)
-        return
-    if is_antibot_page(list_html):
-        summary.rejected += 1
-        logger.warning('Rejected source %s: antibot_page', source.get('name'))
-        return
-
-    event_urls = get_event_urls(list_html, list_url, source.get('list_links_selector'))
-    if not event_urls and is_supported_event_url(normalize_url(list_url, list_url)):
-        event_urls = [normalize_url(list_url, list_url)]
-
-    logger.info('Found %s potential events for %s.', len(event_urls), source.get('name'))
-    summary.found += len(event_urls)
-
-    for event_url in event_urls:
-        try:
-            event_html = safe_get(event_url, custom_headers=custom_headers, policy=request_policy)
-            if not event_html:
-                summary.rejected += 1
-                logger.warning('Rejected event %s: fetch_failed', event_url)
-                continue
-
-            event_data = scrape_event_details(event_html, event_url, source)
-            title = event_data['title'] or 'Nieznane wydarzenie'
-            date_info = f'{event_data["date"] or ""} {event_data["time"] or ""}'.strip() or 'Unknown Date'
-            event = {
-                'id': event_id_for_url(event_url),
-                'title': title,
-                'link': event_url,
-                'date_info': date_info,
-                'available_places': event_data['tickets_available'],
-                'measurement_known': event_data['measurement_known'],
-                'rejection_reason': event_data['rejection_reason'],
-                'image_url': event_data['image_url'],
-                'custom_ntfy_url': source.get('ntfy_url'),
-                'custom_ntfy_template': source.get('ntfy_template'),
-            }
-            save_event(event, summary, is_first_run)
-        except Exception:
-            summary.rejected += 1
-            logger.exception('Failed to process event %s', event_url)
-        finally:
-            time.sleep(1)
-
-
-def run_scraper(is_first_run=False):
-    summary = ScrapeSummary()
-    run_id = None
-    if not _RUN_LOCK.acquire(blocking=False):
-        summary.skipped = True
-        logger.warning('Scrape run skipped because another run is active in this process.')
-        return summary.as_dict()
-
-    lease_owner = f'{socket.gethostname()}:{os.getpid()}:{uuid.uuid4()}'
-    lease_seconds = int(os.getenv('SCRAPE_LEASE_SECONDS', '1800'))
-    try:
-        if not acquire_scrape_lease(lease_owner, ttl_seconds=lease_seconds):
-            summary.skipped = True
-            logger.warning('Scrape run skipped because another process holds the lease.')
-            return summary.as_dict()
-
-        logger.info('Starting scrape run...')
-        run_id = start_scraper_run()
-
-        try:
-            sources = active_sources()
-        except Exception:
-            logger.exception('Could not load scraping sources.')
-            finish_scraper_run(run_id, 'failed', summary.as_dict(), 'could_not_load_sources')
-            return summary.as_dict()
-
-        for source in sources:
-            summary.sources += 1
-            list_url = source['list_url']
-            custom_headers, header_controls = parse_custom_headers(source)
-            request_policy = build_request_policy(list_url, header_controls)
-            try:
-                validate_url_for_request(normalize_url_for_request(list_url), request_policy)
-                if source.get('is_api') == 1:
-                    logger.info('Starting API source: %s (%s)', source.get('name'), sanitize_url_for_log(list_url))
-                    process_api_source(source, list_url, custom_headers, request_policy, summary, is_first_run)
-                else:
-                    logger.info('Starting HTML source: %s (%s)', source.get('name'), sanitize_url_for_log(list_url))
-                    process_html_source(source, list_url, custom_headers, request_policy, summary, is_first_run)
-            except URLBlockedError as exc:
-                summary.rejected += 1
-                logger.warning('Rejected source %s: %s', source.get('name'), exc)
-            except Exception:
-                summary.rejected += 1
-                logger.exception('Source failed: %s', source.get('name'))
-
-        summary_payload = summary.as_dict()
-        logger.info('Scrape run completed. Summary: %s', summary_payload)
-        finish_scraper_run(run_id, 'success', summary_payload)
-        return summary_payload
-    except Exception:
-        if run_id:
-            finish_scraper_run(run_id, 'failed', summary.as_dict(), 'unhandled_exception')
-        raise
-    finally:
-        release_scrape_lease(lease_owner)
-        _RUN_LOCK.release()
+            is_new, max_avail = update_event(
+                event['id'], 
+                event['title'], 
+                event['link'], 
+                event['date_info'], 
+                event['available_places'],
+                event.get('image_url')
+            )
+            
+            # Alerting logic requested format
+            # title: nazwa wydarzenia
+            # opis: dostepna ilosc biletów: dostępne/max
+            
+            msg = f"dostepna ilosc biletów: {event['available_places']}/{max_avail}"
+            title = event['title']
+            
+            if is_new and not is_first_run:
+                send_alert(title, msg, tags=["new", "tada"])
+            elif not is_first_run and event['available_places'] > 0 and event['available_places'] < 5:
+                # Wysyłaj alert tylko jeśli ilość biletów zmieniła się od ostatniego sprawdzenia
+                if last_known_tickets.get(event['id']) != event['available_places']:
+                    send_alert(title, msg, tags=["warning"])
+            
+            last_known_tickets[event['id']] = event['available_places']
+        except Exception as e:
+            logger.error(f"Error updating event {event['title']}: {e}")
+            
+    logger.info("Scrape run completed.")
