@@ -1,4 +1,5 @@
 import os
+import socket
 import sqlite3
 import sys
 import tempfile
@@ -427,6 +428,41 @@ class RunScraperTests(TempDbTest):
 
         self.assertTrue(db.acquire_scrape_lease('new-owner', ttl_seconds=60))
         db.release_scrape_lease('new-owner')
+
+    def test_future_local_process_relic_lease_is_reclaimed(self):
+        old_owner = f'{socket.gethostname()}:{os.getpid()}:old-run'
+        conn = sqlite3.connect(db.DB_PATH)
+        try:
+            conn.execute("INSERT INTO system_status (key, value) VALUES ('scrape_lock_owner', ?)", (old_owner,))
+            conn.execute("INSERT INTO system_status (key, value) VALUES ('scrape_lock_expires_at', '2999-01-01T00:00:00Z')")
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.assertTrue(db.acquire_scrape_lease(f'{socket.gethostname()}:{os.getpid()}:new-run', ttl_seconds=60))
+
+    def test_future_foreign_lease_is_not_reclaimed(self):
+        conn = sqlite3.connect(db.DB_PATH)
+        try:
+            conn.execute("INSERT INTO system_status (key, value) VALUES ('scrape_lock_owner', 'other-host:999999:old-run')")
+            conn.execute("INSERT INTO system_status (key, value) VALUES ('scrape_lock_expires_at', '2999-01-01T00:00:00Z')")
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.assertFalse(db.acquire_scrape_lease(f'{socket.gethostname()}:{os.getpid()}:new-run', ttl_seconds=60))
+
+    def test_lease_default_tracks_short_scheduler_interval(self):
+        with patch.dict(os.environ, {'SCRAPE_INTERVAL_MINUTES': '1', 'SCRAPE_LEASE_SECONDS': ''}):
+            self.assertEqual(scraper.configured_lease_seconds(), 120)
+
+    def test_lease_can_be_renewed_by_owner(self):
+        owner = f'{socket.gethostname()}:{os.getpid()}:renew'
+        self.assertTrue(db.acquire_scrape_lease(owner, ttl_seconds=30))
+        self.assertTrue(db.renew_scrape_lease(owner, ttl_seconds=60))
+        state = db.get_scrape_lease_state()
+        self.assertEqual(state['owner'], owner)
+        self.assertTrue(state['active'])
 
 
 if __name__ == '__main__':

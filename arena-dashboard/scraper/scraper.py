@@ -17,7 +17,16 @@ import requests
 from bs4 import BeautifulSoup
 
 from alerts import send_alert
-from db import acquire_scrape_lease, finish_scraper_run, get_connection, release_scrape_lease, start_scraper_run, update_event
+from db import (
+    acquire_scrape_lease,
+    finish_scraper_run,
+    get_connection,
+    get_scrape_lease_state,
+    release_scrape_lease,
+    renew_scrape_lease,
+    start_scraper_run,
+    update_event,
+)
 from request_security import (
     URLBlockedError,
     build_request_policy,
@@ -430,6 +439,36 @@ def parse_custom_headers(source):
         return None, {}
 
 
+def configured_lease_seconds():
+    explicit = os.getenv('SCRAPE_LEASE_SECONDS')
+    if explicit:
+        try:
+            return max(30, int(explicit))
+        except ValueError:
+            logger.warning('Invalid SCRAPE_LEASE_SECONDS=%s; using interval-based default.', explicit)
+
+    try:
+        interval_minutes = int(os.getenv('SCRAPE_INTERVAL_MINUTES', '10'))
+    except ValueError:
+        interval_minutes = 10
+    return max(120, min(1800, interval_minutes * 120))
+
+
+def start_lease_renewal(owner, ttl_seconds):
+    stop_event = threading.Event()
+    interval = max(15, min(60, ttl_seconds // 3))
+
+    def renew_loop():
+        while not stop_event.wait(interval):
+            if not renew_scrape_lease(owner, ttl_seconds=ttl_seconds):
+                logger.warning('Could not renew scrape lease; another process may have taken ownership.')
+                break
+
+    thread = threading.Thread(target=renew_loop, name='scrape-lease-renewal', daemon=True)
+    thread.start()
+    return stop_event, thread
+
+
 def process_api_source(source, list_url, custom_headers, request_policy, summary, is_first_run):
     if '{TODAY}' in list_url:
         list_url = list_url.replace('{TODAY}', datetime.now().strftime('%Y-%m-%dT00:00:00.000Z'))
@@ -516,19 +555,27 @@ def process_html_source(source, list_url, custom_headers, request_policy, summar
 def run_scraper(is_first_run=False):
     summary = ScrapeSummary()
     run_id = None
+    renewal = None
     if not _RUN_LOCK.acquire(blocking=False):
         summary.skipped = True
         logger.warning('Scrape run skipped because another run is active in this process.')
         return summary.as_dict()
 
     lease_owner = f'{socket.gethostname()}:{os.getpid()}:{uuid.uuid4()}'
-    lease_seconds = int(os.getenv('SCRAPE_LEASE_SECONDS', '1800'))
+    lease_seconds = configured_lease_seconds()
     try:
         if not acquire_scrape_lease(lease_owner, ttl_seconds=lease_seconds):
             summary.skipped = True
-            logger.warning('Scrape run skipped because another process holds the lease.')
+            lease = get_scrape_lease_state()
+            logger.warning(
+                'Scrape run skipped because another process holds the lease. owner=%s expires_at=%s expires_in_seconds=%s',
+                lease.get('owner') or 'unknown',
+                lease.get('expires_at') or 'unknown',
+                lease.get('expires_in_seconds'),
+            )
             return summary.as_dict()
 
+        renewal = start_lease_renewal(lease_owner, lease_seconds)
         logger.info('Starting scrape run...')
         run_id = start_scraper_run()
 
@@ -568,5 +615,9 @@ def run_scraper(is_first_run=False):
             finish_scraper_run(run_id, 'failed', summary.as_dict(), exc)
         raise
     finally:
+        if renewal:
+            stop_event, thread = renewal
+            stop_event.set()
+            thread.join(timeout=1)
         release_scrape_lease(lease_owner)
         _RUN_LOCK.release()

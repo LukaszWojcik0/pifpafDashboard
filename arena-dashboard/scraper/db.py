@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import sqlite3
+import socket
 from datetime import UTC, datetime, timedelta
 
 from db_migrations import (
@@ -90,6 +91,57 @@ def _set_status(cursor, key, value):
     )
 
 
+def _parse_lease_owner(owner):
+    parts = str(owner or "").split(":", 2)
+    if len(parts) < 2:
+        return None, None
+    try:
+        return parts[0], int(parts[1])
+    except ValueError:
+        return parts[0], None
+
+
+def _local_lease_owner_can_be_reclaimed(owner):
+    host, pid = _parse_lease_owner(owner)
+    if host != socket.gethostname() or pid is None:
+        return False
+    if pid == os.getpid():
+        return True
+    try:
+        os.kill(pid, 0)
+        return False
+    except ProcessLookupError:
+        return True
+    except (PermissionError, OSError):
+        return False
+
+
+def get_scrape_lease_state():
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        owner = _get_status(cursor, "scrape_lock_owner") or ""
+        expires_raw = _get_status(cursor, "scrape_lock_expires_at") or ""
+        now = datetime.now(UTC)
+        expires_at = None
+        if expires_raw:
+            try:
+                expires_at = datetime.fromisoformat(expires_raw.replace("Z", "+00:00"))
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=UTC)
+            except ValueError:
+                expires_at = None
+        expires_in_seconds = int((expires_at - now).total_seconds()) if expires_at else None
+        return {
+            "owner": owner,
+            "expires_at": expires_raw,
+            "expires_in_seconds": expires_in_seconds,
+            "active": bool(owner and expires_at and expires_at > now),
+        }
+    finally:
+        conn.close()
+
+
 def acquire_scrape_lease(owner, ttl_seconds=1800):
     conn = get_connection()
     try:
@@ -107,11 +159,31 @@ def acquire_scrape_lease(owner, ttl_seconds=1800):
             except ValueError:
                 expires_at = now - timedelta(seconds=1)
             if expires_at > now and current_owner and current_owner != owner:
-                conn.rollback()
-                return False
+                if _local_lease_owner_can_be_reclaimed(current_owner):
+                    logger.warning("Reclaiming stale local scrape lease held by %s", current_owner)
+                else:
+                    conn.rollback()
+                    return False
 
         expires_at = now + timedelta(seconds=ttl_seconds)
         _set_status(cursor, "scrape_lock_owner", owner)
+        _set_status(cursor, "scrape_lock_expires_at", expires_at.isoformat().replace("+00:00", "Z"))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def renew_scrape_lease(owner, ttl_seconds=1800):
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        current_owner = _get_status(cursor, "scrape_lock_owner")
+        if current_owner != owner:
+            conn.rollback()
+            return False
+        expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
         _set_status(cursor, "scrape_lock_expires_at", expires_at.isoformat().replace("+00:00", "Z"))
         conn.commit()
         return True
