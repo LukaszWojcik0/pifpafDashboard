@@ -1,19 +1,22 @@
 'use server';
 
-import db from '../db';
 import { revalidatePath } from 'next/cache';
+import { getSession } from '../auth';
+import db from '../db';
 
 export async function deleteEvent(id: string) {
-  if (!db) return { success: false, error: 'Brak połączenia z bazą' };
+  const session = await getSession();
+  if (!session) return { success: false, error: 'Brak uprawnien' };
+  if (!db) return { success: false, error: 'Brak polaczenia z baza' };
+
   try {
-    const stmt1 = db.prepare('DELETE FROM event_snapshots WHERE event_id = ?');
-    stmt1.run(id);
-    const stmt2 = db.prepare('DELETE FROM events WHERE id = ?');
-    stmt2.run(id);
+    db.prepare('DELETE FROM event_snapshots WHERE event_id = ?').run(id);
+    db.prepare('DELETE FROM events WHERE id = ?').run(id);
     revalidatePath('/');
     revalidatePath('/admin');
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: message };
   }
 }

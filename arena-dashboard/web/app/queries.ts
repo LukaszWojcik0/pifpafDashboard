@@ -1,6 +1,10 @@
 import db from './db';
 import { Event, Snapshot } from './types';
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * Pobiera wszystkie wydarzenia z bazy danych.
  * Zwraca pustą tablicę, jeśli baza danych nie jest dostępna (np. podczas budowania).
@@ -28,7 +32,7 @@ export function getEvents(): Event[] {
   } catch (error) {
     console.error(
       "[DB DEBUG] Błąd głównego zapytania (przechodzę na zapasowe):",
-      error.message,
+      errorMessage(error),
     );
     try {
       // Zapasowe zapytanie dla starszych plików bazy danych

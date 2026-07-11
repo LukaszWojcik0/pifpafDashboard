@@ -6,6 +6,8 @@ export interface Event {
   event_time: string;
   status: string;
   max_available: number | null;
+  current_available: number | null;
+  image_url: string | null;
   last_seen: string;
 }
 

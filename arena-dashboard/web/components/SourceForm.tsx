@@ -13,7 +13,7 @@ function SubmitBtn() {
   );
 }
 
-export default function SourceForm({ action }: { action: (formData: FormData) => void }) {
+export default function SourceForm({ action }: { action: (formData: FormData) => void | Promise<void> }) {
   const [preset, setPreset] = useState('custom');
   const [isApi, setIsApi] = useState('0');
 
