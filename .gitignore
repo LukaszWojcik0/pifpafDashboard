@@ -36,7 +36,8 @@ share/python-wheels/
 MANIFEST
 
 # Environments
-.env
+.env*
+!.env.example
 .venv
 env/
 venv/
@@ -46,8 +47,18 @@ venv.bak/
 
 # SQLite
 *.sqlite3
+*.sqlite
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
+*-wal
+*-shm
 events.db
+data/
+
+# TypeScript
+*.tsbuildinfo
 
 # OS
 .DS_Store

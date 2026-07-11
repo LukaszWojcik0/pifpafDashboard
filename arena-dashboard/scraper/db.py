@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
@@ -64,6 +65,13 @@ def update_status(key, value):
         conn.commit()
     finally:
         conn.close()
+
+
+def sanitize_error_message(error):
+    text = str(error or "unknown_error")
+    text = re.sub(r"(?i)(authorization|cookie|api[_-]?key|token|password)=([^&\s]+)", r"\1=[redacted]", text)
+    text = re.sub(r"(?i)(bearer|basic)\s+[a-z0-9._~+/=-]+", r"\1 [redacted]", text)
+    return text[:500]
 
 
 def _get_status(cursor, key):
@@ -159,22 +167,37 @@ def start_scraper_run():
 def finish_scraper_run(run_id, status, summary=None, error=None):
     conn = get_connection()
     finished_at = utc_now()
+    sanitized_error = sanitize_error_message(error) if error else None
+    duration_seconds = None
     try:
+        row = conn.execute("SELECT started_at FROM scraper_runs WHERE id = ?", (run_id,)).fetchone()
+        if row and row["started_at"]:
+            try:
+                started_at = datetime.fromisoformat(str(row["started_at"]).replace("Z", "+00:00"))
+                finished = datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
+                duration_seconds = max(0.0, (finished - started_at).total_seconds())
+            except ValueError:
+                duration_seconds = None
         conn.execute(
             """
             UPDATE scraper_runs
             SET finished_at = ?, status = ?, summary_json = ?, error = ?
             WHERE id = ?
             """,
-            (finished_at, status, json.dumps(summary or {}, ensure_ascii=False), error, run_id),
+            (finished_at, status, json.dumps(summary or {}, ensure_ascii=False), sanitized_error, run_id),
         )
         conn.commit()
     finally:
         conn.close()
     update_status("last_scrape_finished_at", finished_at)
     update_status("last_scrape_status", status)
+    if duration_seconds is not None:
+        update_status("last_scrape_duration_seconds", f"{duration_seconds:.3f}")
     if status == "success":
         update_status("last_success_at", finished_at)
+    elif status == "failed":
+        update_status("last_error_at", finished_at)
+        update_status("last_error_reason", sanitized_error or "unknown_error")
     if summary is not None:
         update_status("last_scrape_summary", json.dumps(summary, ensure_ascii=False))
 

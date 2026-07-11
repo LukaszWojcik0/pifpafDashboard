@@ -11,7 +11,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Zainstaluj zależności (w tym kroku skompiluje się better-sqlite3)
-RUN npm install
+RUN npm ci
 
 # Skopiuj resztę kodu źródłowego aplikacji
 COPY . .

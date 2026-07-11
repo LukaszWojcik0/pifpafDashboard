@@ -58,9 +58,40 @@ W Portainerze:
 3. uzyj aktualnego, przebudowanego obrazu uslugi `scraper`
 4. zamontuj rzeczywisty wolumen `pifpaf-data` jako `/data`
 5. nie publikuj portow
-6. siec nie jest potrzebna do backupu ani migracji
+6. nadpisz domyslna komende startowa, zeby nie uruchamiac `python main.py`
+7. siec nie jest potrzebna do backupu ani migracji
+
+Ustaw komende kontenera pomocniczego na:
+
+```bash
+sleep 3600
+```
+
+Jezeli Portainer ma osobne pola `Command` i `Entrypoint`, uzyj jednej z tych bezpiecznych konfiguracji:
+
+```text
+Command: sleep 3600
+Entrypoint: zostaw puste
+```
+
+albo:
+
+```text
+Command: 3600
+Entrypoint: sleep
+```
+
+Nie uruchamiaj kontenera pomocniczego z domyslna komenda obrazu, bo wtedy wystartuje `main.py` i scraper/scheduler zamiast narzedzi backupu.
 
 DO WERYFIKACJI W PORTAINERZE: dokladna nazwa obrazu uzywanego przez `arena-scraper`.
+
+Jezeli log kontenera pomocniczego pokazuje:
+
+```text
+Traceback ... File "/app/main.py"
+```
+
+to znaczy, ze kontener wystartowal z domyslna komenda. Usun go i utworz ponownie z komenda `sleep 3600`.
 
 Jezeli komenda backupu zwraca:
 

@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    env:
+      WEB_PORT: "8088"
+      VPN_USER: "ci-vpn-user"
+      VPN_PASSWORD: "ci-vpn-password"
+      CLOUDFLARE_TUNNEL_TOKEN: "ci-cloudflare-token"
+      ADMIN_SETUP_TOKEN: "ci-admin-setup-token"
+      SCRAPE_INTERVAL_MINUTES: "10"
+      ALERT_ON_FIRST_RUN: "false"
+      NTFY_URL: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: arena-dashboard/web/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: arena-dashboard/scraper/requirements.txt
+
+      - name: Repository hygiene
+        run: python tools/ci_repo_guard.py --hygiene
+
+      - name: Secret scan
+        run: python tools/ci_repo_guard.py --secrets
+
+      - name: Install frontend dependencies
+        working-directory: arena-dashboard/web
+        run: npm ci
+
+      - name: Install Python dependencies
+        run: python -m pip install -r arena-dashboard/scraper/requirements.txt
+
+      - name: Frontend typecheck
+        working-directory: arena-dashboard/web
+        run: npm run typecheck
+
+      - name: Frontend lint
+        working-directory: arena-dashboard/web
+        run: npm run lint
+
+      - name: Frontend tests
+        working-directory: arena-dashboard/web
+        run: npm test
+
+      - name: Python tests, parser tests and migration tests
+        run: python -m unittest discover -s arena-dashboard/scraper/tests -v
+
+      - name: Frontend production build
+        working-directory: arena-dashboard/web
+        run: npm run build
+
+      - name: Validate production Docker Compose
+        run: docker compose -f docker-compose.yml config
+
+      - name: Validate test Docker Compose
+        run: docker compose -f docker-compose.test.yml config
+
+      - name: Production dependency audit
+        working-directory: arena-dashboard/web
+        run: npm audit --omit=dev

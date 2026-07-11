@@ -563,9 +563,9 @@ def run_scraper(is_first_run=False):
         logger.info('Scrape run completed. Summary: %s', summary_payload)
         finish_scraper_run(run_id, 'success', summary_payload)
         return summary_payload
-    except Exception:
+    except Exception as exc:
         if run_id:
-            finish_scraper_run(run_id, 'failed', summary.as_dict(), 'unhandled_exception')
+            finish_scraper_run(run_id, 'failed', summary.as_dict(), exc)
         raise
     finally:
         release_scrape_lease(lease_owner)
