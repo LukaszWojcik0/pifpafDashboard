@@ -36,8 +36,8 @@ function safeCompareHex(value: string, expected: string): boolean {
   return valueBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(valueBuffer, expectedBuffer);
 }
 
-function clientAddress(): string {
-  const requestHeaders = headers();
+async function clientAddress(): Promise<string> {
+  const requestHeaders = await headers();
   return (
     requestHeaders.get('cf-connecting-ip') ||
     requestHeaders.get('x-real-ip') ||
@@ -46,12 +46,12 @@ function clientAddress(): string {
   );
 }
 
-function loginRateLimitKey(username: string): string {
-  return `${username.toLowerCase()}:${clientAddress()}`;
+async function loginRateLimitKey(username: string): Promise<string> {
+  return `${username.toLowerCase()}:${await clientAddress()}`;
 }
 
 export async function getSession(): Promise<string | null> {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get('session_token')?.value;
   if (!token || !db) return null;
 
@@ -115,7 +115,7 @@ export async function loginUser(formData: FormData) {
     redirectWithError('/login', 'Nieprawidlowy login lub haslo');
   }
 
-  const rateLimitKey = loginRateLimitKey(username);
+  const rateLimitKey = await loginRateLimitKey(username);
   if (loginRateLimiter.isLimited(rateLimitKey)) {
     redirectWithError('/login', 'Zbyt wiele nieudanych prob logowania. Sprobuj ponownie pozniej.');
   }
@@ -138,7 +138,8 @@ export async function loginUser(formData: FormData) {
   const expiresAt = new Date(Date.now() + 60 * 60 * 24 * 7 * 1000).toISOString();
   database.prepare('INSERT INTO sessions (token, username, expires_at, created_at) VALUES (?, ?, ?, ?)').run(token, username, expiresAt, new Date().toISOString());
 
-  cookies().set('session_token', token, {
+  const cookieStore = await cookies();
+  cookieStore.set('session_token', token, {
     httpOnly: true,
     secure: isSecureCookieEnabled(),
     maxAge: 60 * 60 * 24 * 7,
@@ -150,8 +151,9 @@ export async function loginUser(formData: FormData) {
 }
 
 export async function logout() {
-  const token = cookies().get('session_token')?.value;
+  const cookieStore = await cookies();
+  const token = cookieStore.get('session_token')?.value;
   if (token && db) db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
-  cookies().delete('session_token');
+  cookieStore.delete('session_token');
   redirect('/login');
 }
