@@ -18,3 +18,24 @@ export interface Snapshot {
   status: string;
   checked_at: string;
 }
+
+export interface ScraperStatus {
+  status: string | null;
+  lastStartedAt: string | null;
+  lastFinishedAt: string | null;
+  lastSuccessAt: string | null;
+  lastErrorAt: string | null;
+  lastErrorReason: string | null;
+  durationSeconds: number | null;
+  summary: {
+    sources?: number;
+    found?: number;
+    valid?: number;
+    rejected?: number;
+    created?: number;
+    updated?: number;
+    skipped?: boolean;
+  };
+  stale: boolean;
+  staleAfterMinutes: number;
+}

@@ -1,12 +1,14 @@
-import { getEvents } from './queries';
+import { getEvents, getScraperStatus } from './queries';
 import EventsTable from './EventsTable';
 import { getSession, logout } from './auth';
 import Link from 'next/link';
+import ScraperStatusBanner from './ScraperStatusBanner';
 
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
   const events = getEvents();
+  const scraperStatus = getScraperStatus();
   const session = await getSession();
 
   // Sortowanie wydarzeń: nadchodzące najbliżej (najwcześniej) na początku
@@ -37,6 +39,7 @@ export default async function Home() {
           </Link>
         )}
       </div>
+      <ScraperStatusBanner status={scraperStatus} />
       <EventsTable initialEvents={events} />
     </main>
   );
