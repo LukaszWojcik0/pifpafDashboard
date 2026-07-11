@@ -55,12 +55,26 @@ W Portainerze:
 
 1. wejdz w `Containers`
 2. wybierz `Add container`
-3. uzyj obrazu uslugi `scraper`
+3. uzyj aktualnego, przebudowanego obrazu uslugi `scraper`
 4. zamontuj rzeczywisty wolumen `pifpaf-data` jako `/data`
 5. nie publikuj portow
 6. siec nie jest potrzebna do backupu ani migracji
 
 DO WERYFIKACJI W PORTAINERZE: dokladna nazwa obrazu uzywanego przez `arena-scraper`.
+
+Jezeli komenda backupu zwraca:
+
+```text
+python: can't open file '/app/backup_db.py': [Errno 2] No such file or directory
+```
+
+to znaczy, ze kontener pomocniczy zostal uruchomiony ze starego obrazu albo z niewlasciwego obrazu. W takim przypadku:
+
+1. usun kontener pomocniczy,
+2. wykonaj rebuild/redeploy stacka tak, aby obraz `scraper` zawieral aktualny kod,
+3. zatrzymaj ponownie `scraper` i `web`,
+4. utworz nowy kontener pomocniczy z aktualnego obrazu `scraper`,
+5. zamontuj ten sam wolumen jako `/data`.
 
 Jezeli Portainer po rebuildzie automatycznie uruchomi `arena-scraper` przed migracja, scraper powinien zalogowac:
 
@@ -70,7 +84,19 @@ Database schema requires a controlled migration
 
 To jest oczekiwane zabezpieczenie. Zatrzymaj wtedy ponownie `scraper` i upewnij sie, ze `web` tez jest zatrzymany.
 
-## 4. Backup - komenda do skopiowania
+## 4. Sprawdz, czy kontener ma aktualne skrypty
+
+Uruchom w kontenerze pomocniczym:
+
+```bash
+ls -l /app/backup_db.py /app/check_db.py /app/migrate_db.py /app/restore_db.py
+```
+
+Pozytywny wynik: widzisz cztery pliki.
+
+Maksymalny punkt przerwania: jezeli ktoregokolwiek pliku brakuje, nie wykonuj backupu ani migracji w tym kontenerze. Uzywasz starego albo zlego obrazu.
+
+## 5. Backup - komenda do skopiowania
 
 Uruchom te komende w kontenerze pomocniczym:
 
@@ -88,7 +114,7 @@ Metadata written: /data/backups/app-YYYYMMDD-HHMMSS.db.metadata.json
 
 Maksymalny punkt przerwania: jezeli nie widzisz `integrity_check: ok`, przerwij operacje i nie uruchamiaj migracji.
 
-## 5. Sprawdz najnowszy backup - komenda do skopiowania
+## 6. Sprawdz najnowszy backup - komenda do skopiowania
 
 Uruchom:
 
@@ -110,7 +136,7 @@ integrity_check: ok
 foreign_key_check: [...]
 ```
 
-## 6. Dry-run migracji - komenda do skopiowania
+## 7. Dry-run migracji - komenda do skopiowania
 
 Uruchom:
 
@@ -136,7 +162,7 @@ migrations: 001_create_canonical_schema, 002_migrate_legacy_scraper_schema, 003_
 
 Maksymalny punkt przerwania: jezeli dry-run zwraca `Unsupported SQLite schema`, blad integralnosci, brak `/data/app.db` albo wyglada jak praca na zlym wolumenie, przerwij operacje.
 
-## 7. Migracja - komenda do skopiowania
+## 8. Migracja - komenda do skopiowania
 
 Po poprawnym backupie i dry-run uruchom:
 
@@ -153,7 +179,7 @@ integrity_check: ok
 foreign_key_issues: 0
 ```
 
-## 8. Sprawdz baze po migracji - komenda do skopiowania
+## 9. Sprawdz baze po migracji - komenda do skopiowania
 
 Uruchom:
 
@@ -172,7 +198,7 @@ schema_version: 4
 
 Maksymalny punkt przerwania: jezeli wynik nie jest `ok`, `foreign_key_check` nie jest `[]` albo `schema_version` nie jest `4`, nie uruchamiaj aplikacji. Wykonaj rollback.
 
-## 9. Uruchom uslugi
+## 10. Uruchom uslugi
 
 W Portainerze:
 
@@ -193,7 +219,7 @@ Pozytywne wyniki:
 
 DO WERYFIKACJI W PORTAINERZE: publiczny adres dashboardu, bo konfiguracja ingress Cloudflare Tunnel nie jest w repozytorium.
 
-## 10. Rollback bazy - komendy do skopiowania
+## 11. Rollback bazy - komendy do skopiowania
 
 Rollback wykonuj tylko przy zatrzymanych:
 
