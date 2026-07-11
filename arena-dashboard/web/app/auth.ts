@@ -56,8 +56,9 @@ export async function getSession(): Promise<string | null> {
   if (!token || !db) return null;
 
   try {
-    const stmt = db.prepare("SELECT username FROM sessions WHERE token = ? AND expires_at > datetime('now')");
-    const session = stmt.get(token) as { username: string } | undefined;
+    const now = new Date().toISOString();
+    const stmt = db.prepare('SELECT username FROM sessions WHERE token = ? AND expires_at > ?');
+    const session = stmt.get(token, now) as { username: string } | undefined;
     return session ? session.username : null;
   } catch (error) {
     console.error('Blad podczas weryfikacji sesji:', error);
@@ -92,7 +93,7 @@ export async function setupUser(formData: FormData) {
   const createFirstAdmin = database.transaction(() => {
     const currentCount = (database.prepare('SELECT count(*) as c FROM users').get() as { c: number }).c;
     if (currentCount > 0) return false;
-    database.prepare('INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)').run(username, hash, salt);
+    database.prepare('INSERT INTO users (username, password_hash, salt, created_at) VALUES (?, ?, ?, ?)').run(username, hash, salt, new Date().toISOString());
     return true;
   });
 
@@ -134,7 +135,8 @@ export async function loginUser(formData: FormData) {
   loginRateLimiter.clear(rateLimitKey);
 
   const token = crypto.randomBytes(32).toString('hex');
-  database.prepare("INSERT INTO sessions (token, username, expires_at) VALUES (?, ?, datetime('now', '+7 days'))").run(token, username);
+  const expiresAt = new Date(Date.now() + 60 * 60 * 24 * 7 * 1000).toISOString();
+  database.prepare('INSERT INTO sessions (token, username, expires_at, created_at) VALUES (?, ?, ?, ?)').run(token, username, expiresAt, new Date().toISOString());
 
   cookies().set('session_token', token, {
     httpOnly: true,

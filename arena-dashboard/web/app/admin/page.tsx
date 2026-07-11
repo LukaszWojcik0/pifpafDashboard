@@ -78,13 +78,6 @@ async function deleteEvent(formData: FormData) {
 
   const id = formData.get('id');
   if (db && id) {
-    try {
-      db.prepare('DELETE FROM snapshots WHERE event_id = ?').run(id);
-    } catch (e) {
-      try {
-        db.prepare('DELETE FROM event_snapshots WHERE event_id = ?').run(id);
-      } catch (err) {}
-    }
     db.prepare('DELETE FROM events WHERE id = ?').run(id);
     revalidatePath('/admin');
   }

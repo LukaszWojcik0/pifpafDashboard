@@ -17,7 +17,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from alerts import send_alert
-from db import acquire_scrape_lease, get_connection, release_scrape_lease, update_event, update_status
+from db import acquire_scrape_lease, finish_scraper_run, get_connection, release_scrape_lease, start_scraper_run, update_event
 from request_security import (
     URLBlockedError,
     build_request_policy,
@@ -515,6 +515,7 @@ def process_html_source(source, list_url, custom_headers, request_policy, summar
 
 def run_scraper(is_first_run=False):
     summary = ScrapeSummary()
+    run_id = None
     if not _RUN_LOCK.acquire(blocking=False):
         summary.skipped = True
         logger.warning('Scrape run skipped because another run is active in this process.')
@@ -529,14 +530,13 @@ def run_scraper(is_first_run=False):
             return summary.as_dict()
 
         logger.info('Starting scrape run...')
-        update_status('last_scrape_started_at', datetime.now(timezone.utc).isoformat())
-        update_status('last_scrape_status', 'running')
+        run_id = start_scraper_run()
 
         try:
             sources = active_sources()
         except Exception:
             logger.exception('Could not load scraping sources.')
-            update_status('last_scrape_status', 'failed')
+            finish_scraper_run(run_id, 'failed', summary.as_dict(), 'could_not_load_sources')
             return summary.as_dict()
 
         for source in sources:
@@ -561,13 +561,12 @@ def run_scraper(is_first_run=False):
 
         summary_payload = summary.as_dict()
         logger.info('Scrape run completed. Summary: %s', summary_payload)
-        update_status('last_scrape_summary', json.dumps(summary_payload, ensure_ascii=False))
-        update_status('last_scrape_status', 'success')
+        finish_scraper_run(run_id, 'success', summary_payload)
         return summary_payload
     except Exception:
-        update_status('last_scrape_status', 'failed')
+        if run_id:
+            finish_scraper_run(run_id, 'failed', summary.as_dict(), 'unhandled_exception')
         raise
     finally:
-        update_status('last_scrape_finished_at', datetime.now(timezone.utc).isoformat())
         release_scrape_lease(lease_owner)
         _RUN_LOCK.release()

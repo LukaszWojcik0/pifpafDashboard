@@ -173,17 +173,19 @@ class DbUnknownTests(TempDbTest):
         db.update_event('event-1', 'Alpha', 'https://example.test/a', 'date', None)
         db.update_event('event-1', 'Alpha', 'https://example.test/a', 'date', 10)
         events = self.rows('SELECT max_available FROM events WHERE id = "event-1"')
-        snapshots = self.rows('SELECT available_places FROM event_snapshots WHERE event_id = "event-1" ORDER BY id')
+        snapshots = self.rows('SELECT available, status FROM snapshots WHERE event_id = "event-1" ORDER BY id')
         self.assertEqual(events[0]['max_available'], 10)
-        self.assertEqual([row['available_places'] for row in snapshots], [10, 10])
+        self.assertEqual([row['available'] for row in snapshots], [10])
+        self.assertEqual([row['status'] for row in snapshots], ['available'])
 
     def test_ten_then_valid_zero_writes_zero_snapshot(self):
         db.update_event('event-1', 'Alpha', 'https://example.test/a', 'date', 10)
         db.update_event('event-1', 'Alpha', 'https://example.test/a', 'date', 0)
         events = self.rows('SELECT max_available FROM events WHERE id = "event-1"')
-        snapshots = self.rows('SELECT available_places FROM event_snapshots WHERE event_id = "event-1" ORDER BY id')
+        snapshots = self.rows('SELECT available, status FROM snapshots WHERE event_id = "event-1" ORDER BY id')
         self.assertEqual(events[0]['max_available'], 10)
-        self.assertEqual([row['available_places'] for row in snapshots], [10, 0])
+        self.assertEqual([row['available'] for row in snapshots], [10, 0])
+        self.assertEqual([row['status'] for row in snapshots], ['available', 'sold_out'])
 
 
 class FetchTests(unittest.TestCase):
@@ -313,7 +315,7 @@ class RunScraperTests(TempDbTest):
         self.assertEqual(summary['valid'], 1)
         self.assertEqual(summary['rejected'], 2)
         self.assertEqual(summary['created'], 2)
-        self.assertEqual(len(self.rows('SELECT * FROM event_snapshots')), 1)
+        self.assertEqual(len(self.rows('SELECT * FROM snapshots')), 1)
 
     def test_reprocessing_same_event_updates_instead_of_duplicating_event(self):
         self.replace_sources([source()])
@@ -333,7 +335,7 @@ class RunScraperTests(TempDbTest):
         self.assertEqual(first['found'], 1)
         self.assertEqual(second['found'], 1)
         self.assertEqual(len(self.rows('SELECT * FROM events')), 1)
-        self.assertEqual(len(self.rows('SELECT * FROM event_snapshots')), 2)
+        self.assertEqual(len(self.rows('SELECT * FROM snapshots')), 1)
         self.assertEqual(second['updated'], 1)
 
     def test_antibot_list_with_http_200_is_rejected(self):
@@ -348,7 +350,7 @@ class RunScraperTests(TempDbTest):
 
         self.assertEqual(summary['found'], 0)
         self.assertEqual(summary['rejected'], 1)
-        self.assertEqual(len(self.rows('SELECT * FROM event_snapshots')), 0)
+        self.assertEqual(len(self.rows('SELECT * FROM snapshots')), 0)
 
     def test_malicious_html_url_is_not_requested_or_saved(self):
         self.replace_sources([source()])

@@ -1,147 +1,99 @@
+import json
 import logging
 import os
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
+from db_migrations import (
+    CANONICAL_SCHEMA_VERSION,
+    connect_database,
+    detect_schema_kind,
+    migrate_connection,
+    normalize_timestamp,
+    schema_version,
+)
+
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.getenv('DATABASE_PATH', 'app.db')
+DB_PATH = os.getenv("DATABASE_PATH", "app.db")
+
+
+class SchemaMigrationRequired(RuntimeError):
+    pass
+
+
+def utc_now():
+    return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def get_connection():
-    os.makedirs(os.path.dirname(DB_PATH) if os.path.dirname(DB_PATH) else '.', exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+    return connect_database(DB_PATH)
 
 
 def init_db():
     conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS events (
-            id TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            link TEXT,
-            date_info TEXT,
-            max_available INTEGER DEFAULT 0,
-            last_seen TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            image_url TEXT
-        )
-    ''')
-
     try:
-        cursor.execute('ALTER TABLE events ADD COLUMN image_url TEXT')
-    except sqlite3.OperationalError:
-        pass
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS event_snapshots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id TEXT NOT NULL,
-            available_places INTEGER NOT NULL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(event_id) REFERENCES events(id)
+        kind = detect_schema_kind(conn)
+        version = schema_version(conn)
+        if kind == "empty":
+            report = migrate_connection(conn)
+            logger.info("Created canonical database schema at %s: %s", DB_PATH, report.as_dict())
+            return
+        if kind == "canonical" and version >= CANONICAL_SCHEMA_VERSION:
+            logger.info("Database schema is canonical at %s (version %s)", DB_PATH, version)
+            return
+        raise SchemaMigrationRequired(
+            "Database schema requires a controlled migration. "
+            f"Detected {kind} version {version}. Run migrate_db.py --database {DB_PATH} after backup."
         )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS system_status (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS scraping_sources (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            list_url TEXT NOT NULL,
-            list_links_selector TEXT,
-            title_selector TEXT,
-            date_selector TEXT,
-            time_selector TEXT,
-            image_selector TEXT,
-            tickets_regex TEXT,
-            sold_out_regex TEXT,
-            is_active INTEGER DEFAULT 1,
-            is_api INTEGER DEFAULT 0,
-            request_headers TEXT
-        )
-    ''')
-
-    for column_sql in [
-        'ALTER TABLE scraping_sources ADD COLUMN ntfy_url TEXT',
-        'ALTER TABLE scraping_sources ADD COLUMN ntfy_template TEXT',
-        'ALTER TABLE scraping_sources ADD COLUMN is_api INTEGER DEFAULT 0',
-        'ALTER TABLE scraping_sources ADD COLUMN request_headers TEXT',
-    ]:
-        try:
-            cursor.execute(column_sql)
-        except sqlite3.OperationalError:
-            pass
-
-    cursor.execute('SELECT count(*) FROM scraping_sources')
-    if cursor.fetchone()[0] == 0:
-        logger.info('No scraping sources found. Initializing default Arena Walki source.')
-        cursor.execute('''
-            INSERT INTO scraping_sources
-            (name, list_url, list_links_selector, title_selector, date_selector, time_selector, image_selector, tickets_regex, sold_out_regex)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            'Arena Walki',
-            'https://arenawalki.pl/gry-otwarte/',
-            'a[href*="/produkt/"], a[href*="/wydarzenie/"], a[href*="/events/"]',
-            'h1',
-            '[class*="date"], [class*="data"]',
-            '[class*="time"], [class*="czas"], [class*="godzina"]',
-            'meta[property="og:image"], .wp-post-image, .woocommerce-product-gallery__image img',
-            r'\((\d+)\s+dost(?:epnych|ępnych|Ä™pnych)\)',
-            r'wyprzedane|brak biletow|brak biletów|brak w magazynie|sprzedaz zamknieta|sprzedaż zamknięta',
-        ))
-
-    conn.commit()
-    conn.close()
-    logger.info('Database initialized at %s', DB_PATH)
+    finally:
+        conn.close()
 
 
 def update_status(key, value):
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO system_status (key, value)
-        VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    ''', (key, value))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute(
+            """
+            INSERT INTO system_status (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (key, str(value), utc_now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _get_status(cursor, key):
-    row = cursor.execute('SELECT value FROM system_status WHERE key = ?', (key,)).fetchone()
+    row = cursor.execute("SELECT value FROM system_status WHERE key = ?", (key,)).fetchone()
     return row[0] if row else None
 
 
 def _set_status(cursor, key, value):
-    cursor.execute('''
-        INSERT INTO system_status (key, value)
-        VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    ''', (key, value))
+    cursor.execute(
+        """
+        INSERT INTO system_status (key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        """,
+        (key, str(value), utc_now()),
+    )
 
 
 def acquire_scrape_lease(owner, ttl_seconds=1800):
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute('BEGIN IMMEDIATE')
+        cursor.execute("BEGIN IMMEDIATE")
         now = datetime.now(UTC)
-        expires_raw = _get_status(cursor, 'scrape_lock_expires_at')
-        current_owner = _get_status(cursor, 'scrape_lock_owner')
+        expires_raw = _get_status(cursor, "scrape_lock_expires_at")
+        current_owner = _get_status(cursor, "scrape_lock_owner")
 
         if expires_raw:
             try:
-                expires_at = datetime.fromisoformat(expires_raw)
+                expires_at = datetime.fromisoformat(expires_raw.replace("Z", "+00:00"))
                 if expires_at.tzinfo is None:
                     expires_at = expires_at.replace(tzinfo=UTC)
             except ValueError:
@@ -151,8 +103,8 @@ def acquire_scrape_lease(owner, ttl_seconds=1800):
                 return False
 
         expires_at = now + timedelta(seconds=ttl_seconds)
-        _set_status(cursor, 'scrape_lock_owner', owner)
-        _set_status(cursor, 'scrape_lock_expires_at', expires_at.isoformat())
+        _set_status(cursor, "scrape_lock_owner", owner)
+        _set_status(cursor, "scrape_lock_expires_at", expires_at.isoformat().replace("+00:00", "Z"))
         conn.commit()
         return True
     finally:
@@ -163,58 +115,170 @@ def release_scrape_lease(owner):
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute('BEGIN IMMEDIATE')
-        current_owner = _get_status(cursor, 'scrape_lock_owner')
+        cursor.execute("BEGIN IMMEDIATE")
+        current_owner = _get_status(cursor, "scrape_lock_owner")
         if current_owner == owner:
-            _set_status(cursor, 'scrape_lock_owner', '')
-            _set_status(cursor, 'scrape_lock_expires_at', '')
+            _set_status(cursor, "scrape_lock_owner", "")
+            _set_status(cursor, "scrape_lock_expires_at", "")
         conn.commit()
     finally:
         conn.close()
 
 
-def update_event(event_id, title, link, date_info, available_places, image_url=None):
-    """Insert or update an event without treating unknown availability as zero.
-
-    available_places=None means that the current scrape could not produce a
-    trustworthy measurement. In that case event metadata is refreshed, the last
-    known max_available is preserved, and no snapshot is written.
-    """
+def start_scraper_run():
     conn = get_connection()
-    cursor = conn.cursor()
-    now = datetime.now(UTC).isoformat()
-
-    cursor.execute('SELECT max_available FROM events WHERE id = ?', (event_id,))
-    row = cursor.fetchone()
-
-    measurement_known = available_places is not None
-    max_available = available_places if measurement_known else None
-    is_new = row is None
-
-    if is_new:
-        cursor.execute('''
-            INSERT INTO events (id, title, link, date_info, max_available, last_seen, image_url)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (event_id, title, link, date_info, max_available, now, image_url))
-    else:
-        current_max = row[0]
-        if measurement_known:
-            max_available = max(current_max or 0, available_places)
-        else:
-            max_available = current_max
-        cursor.execute('''
-            UPDATE events
-            SET title = ?, link = ?, date_info = ?, max_available = ?, last_seen = ?, image_url = ?
-            WHERE id = ?
-        ''', (title, link, date_info, max_available, now, image_url, event_id))
-
-    if measurement_known:
-        cursor.execute('''
-            INSERT INTO event_snapshots (event_id, available_places, timestamp)
+    now = utc_now()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO scraper_runs (started_at, status) VALUES (?, 'running')",
+            (now,),
+        )
+        run_id = cursor.lastrowid
+        conn.execute(
+            """
+            INSERT INTO system_status (key, value, updated_at)
             VALUES (?, ?, ?)
-        ''', (event_id, available_places, now))
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            ("last_scrape_started_at", now, now),
+        )
+        conn.execute(
+            """
+            INSERT INTO system_status (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            ("last_scrape_status", "running", now),
+        )
+        conn.commit()
+        return run_id
+    finally:
+        conn.close()
 
-    conn.commit()
-    conn.close()
 
-    return is_new, max_available, measurement_known
+def finish_scraper_run(run_id, status, summary=None, error=None):
+    conn = get_connection()
+    finished_at = utc_now()
+    try:
+        conn.execute(
+            """
+            UPDATE scraper_runs
+            SET finished_at = ?, status = ?, summary_json = ?, error = ?
+            WHERE id = ?
+            """,
+            (finished_at, status, json.dumps(summary or {}, ensure_ascii=False), error, run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    update_status("last_scrape_finished_at", finished_at)
+    update_status("last_scrape_status", status)
+    if status == "success":
+        update_status("last_success_at", finished_at)
+    if summary is not None:
+        update_status("last_scrape_summary", json.dumps(summary, ensure_ascii=False))
+
+
+def split_date_info(date_info):
+    value = (date_info or "").strip()
+    if not value:
+        return None, None
+    parts = value.rsplit(" ", 1)
+    if len(parts) == 2 and ":" in parts[1]:
+        return parts[0], parts[1]
+    return value, None
+
+
+def event_status(available_places):
+    if available_places is None:
+        return "unknown"
+    return "sold_out" if available_places == 0 else "available"
+
+
+def update_event(event_id, title, link, date_info, available_places, image_url=None):
+    """Insert/update an event and write a snapshot only for known changed values."""
+    conn = get_connection()
+    now = utc_now()
+    event_date, event_time = split_date_info(date_info)
+    measurement_known = available_places is not None
+    status = event_status(available_places)
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        row = cursor.execute(
+            "SELECT current_available, max_available, created_at FROM events WHERE id = ?",
+            (event_id,),
+        ).fetchone()
+        is_new = row is None
+        previous_current = row["current_available"] if row else None
+        previous_max = row["max_available"] if row else None
+        max_available = previous_max
+        current_available = previous_current
+
+        if measurement_known:
+            current_available = int(available_places)
+            max_available = max(previous_max or 0, current_available)
+
+        cursor.execute(
+            """
+            INSERT INTO events
+            (id, title, url, event_date, event_time, status, current_available, max_available,
+             last_seen, created_at, updated_at, image_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                url = excluded.url,
+                event_date = excluded.event_date,
+                event_time = excluded.event_time,
+                status = excluded.status,
+                current_available = excluded.current_available,
+                max_available = excluded.max_available,
+                last_seen = excluded.last_seen,
+                updated_at = excluded.updated_at,
+                image_url = excluded.image_url
+            """,
+            (
+                event_id,
+                title,
+                link,
+                event_date,
+                event_time,
+                status,
+                current_available,
+                max_available,
+                now,
+                normalize_timestamp(row["created_at"]) if row else now,
+                now,
+                image_url,
+            ),
+        )
+
+        if measurement_known:
+            latest = cursor.execute(
+                """
+                SELECT available, status
+                FROM snapshots
+                WHERE event_id = ?
+                ORDER BY checked_at DESC, id DESC
+                LIMIT 1
+                """,
+                (event_id,),
+            ).fetchone()
+            changed = latest is None or latest["available"] != current_available or latest["status"] != status
+            if changed:
+                cursor.execute(
+                    """
+                    INSERT INTO snapshots (event_id, available, status, checked_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (event_id, current_available, status, now),
+                )
+
+        conn.commit()
+        return is_new, max_available, measurement_known
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()

@@ -10,7 +10,6 @@ export async function deleteEvent(id: string) {
   if (!db) return { success: false, error: 'Brak polaczenia z baza' };
 
   try {
-    db.prepare('DELETE FROM event_snapshots WHERE event_id = ?').run(id);
     db.prepare('DELETE FROM events WHERE id = ?').run(id);
     revalidatePath('/');
     revalidatePath('/admin');

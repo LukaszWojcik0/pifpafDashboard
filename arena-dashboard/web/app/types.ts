@@ -14,6 +14,7 @@ export interface Event {
 export interface Snapshot {
   id: number;
   event_id: string;
-  available: number;
+  available: number | null;
+  status: string;
   checked_at: string;
 }
