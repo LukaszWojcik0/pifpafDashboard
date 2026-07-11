@@ -1,7 +1,7 @@
 import logging
 import os
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +117,62 @@ def update_status(key, value):
     conn.close()
 
 
+def _get_status(cursor, key):
+    row = cursor.execute('SELECT value FROM system_status WHERE key = ?', (key,)).fetchone()
+    return row[0] if row else None
+
+
+def _set_status(cursor, key, value):
+    cursor.execute('''
+        INSERT INTO system_status (key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    ''', (key, value))
+
+
+def acquire_scrape_lease(owner, ttl_seconds=1800):
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('BEGIN IMMEDIATE')
+        now = datetime.now(UTC)
+        expires_raw = _get_status(cursor, 'scrape_lock_expires_at')
+        current_owner = _get_status(cursor, 'scrape_lock_owner')
+
+        if expires_raw:
+            try:
+                expires_at = datetime.fromisoformat(expires_raw)
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=UTC)
+            except ValueError:
+                expires_at = now - timedelta(seconds=1)
+            if expires_at > now and current_owner and current_owner != owner:
+                conn.rollback()
+                return False
+
+        expires_at = now + timedelta(seconds=ttl_seconds)
+        _set_status(cursor, 'scrape_lock_owner', owner)
+        _set_status(cursor, 'scrape_lock_expires_at', expires_at.isoformat())
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def release_scrape_lease(owner):
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('BEGIN IMMEDIATE')
+        current_owner = _get_status(cursor, 'scrape_lock_owner')
+        if current_owner == owner:
+            _set_status(cursor, 'scrape_lock_owner', '')
+            _set_status(cursor, 'scrape_lock_expires_at', '')
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def update_event(event_id, title, link, date_info, available_places, image_url=None):
     """Insert or update an event without treating unknown availability as zero.
 
@@ -126,7 +182,7 @@ def update_event(event_id, title, link, date_info, available_places, image_url=N
     """
     conn = get_connection()
     cursor = conn.cursor()
-    now = datetime.now()
+    now = datetime.now(UTC).isoformat()
 
     cursor.execute('SELECT max_available FROM events WHERE id = ?', (event_id,))
     row = cursor.fetchone()

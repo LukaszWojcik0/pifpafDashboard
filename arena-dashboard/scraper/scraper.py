@@ -1,21 +1,35 @@
 import hashlib
 import json
 import logging
+import os
 import re
 import sqlite3
+import socket
+import threading
 import time
 import unicodedata
+import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup
 
 from alerts import send_alert
-from db import get_connection, update_event, update_status
+from db import acquire_scrape_lease, get_connection, release_scrape_lease, update_event, update_status
+from request_security import (
+    URLBlockedError,
+    build_request_policy,
+    normalize_url_for_request,
+    safe_get,
+    sanitize_url_for_log,
+    split_header_controls,
+    validate_url_for_request,
+)
 
 logger = logging.getLogger(__name__)
+_RUN_LOCK = threading.Lock()
 
 DEFAULT_EVENT_LINK_SELECTOR = 'a[href*="/produkt/"], a[href*="/wydarzenie/"], a[href*="/events/"]'
 DEFAULT_TICKETS_REGEX = r'\((\d+)\s+dost(?:epnych|ępnych|Ä™pnych)\)'
@@ -41,6 +55,7 @@ class ScrapeSummary:
     rejected: int = 0
     created: int = 0
     updated: int = 0
+    skipped: bool = False
 
     def as_dict(self):
         return {
@@ -50,6 +65,7 @@ class ScrapeSummary:
             'rejected': self.rejected,
             'created': self.created,
             'updated': self.updated,
+            'skipped': self.skipped,
         }
 
 
@@ -105,24 +121,14 @@ def is_antibot_page(html_content):
 
 
 def get_page_with_retry(url, retries=3, backoff_factor=1, custom_headers=None):
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-    if custom_headers:
-        headers.update(custom_headers)
-    for attempt in range(retries):
-        try:
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code >= 400:
-                logger.warning('HTTP %s while fetching %s', response.status_code, url)
-                return None
-            return response.text
-        except requests.exceptions.Timeout as exc:
-            logger.warning('Timeout fetching %s on attempt %s/%s: %s', url, attempt + 1, retries, exc)
-        except requests.exceptions.RequestException as exc:
-            logger.warning('Attempt %s/%s failed to fetch %s: %s', attempt + 1, retries, url, exc)
-        if attempt < retries - 1:
-            time.sleep(backoff_factor * (2 ** attempt))
-    logger.error('Failed to fetch %s after %s retries.', url, retries)
-    return None
+    policy = build_request_policy(url)
+    return safe_get(
+        url,
+        retries=retries,
+        backoff_factor=backoff_factor,
+        custom_headers=custom_headers,
+        policy=policy,
+    )
 
 
 def safe_select(soup, selector, context):
@@ -284,7 +290,7 @@ def int_or_unknown(value):
         return TicketParseResult(False, None, 'Nieznany', 'tickets_not_numeric')
 
 
-def build_api_event(evt, source, list_url, custom_headers):
+def build_api_event(evt, source, list_url, custom_headers, request_policy):
     title = get_by_path(evt, source.get('title_selector')) or 'Nieznane Wydarzenie API'
     date = get_by_path(evt, source.get('date_selector'))
     time_value = get_by_path(evt, source.get('time_selector'))
@@ -312,7 +318,7 @@ def build_api_event(evt, source, list_url, custom_headers):
 
     if 'playair.pro' in list_url and event_url_id:
         parts_url = f'https://api.playair.pro/api/user-consent/{event_url_id}'
-        parts_resp = get_page_with_retry(parts_url, retries=1, custom_headers=custom_headers)
+        parts_resp = safe_get(parts_url, retries=1, custom_headers=custom_headers, policy=request_policy)
         if parts_resp:
             try:
                 parts_data = json.loads(parts_resp)
@@ -327,8 +333,13 @@ def build_api_event(evt, source, list_url, custom_headers):
             except Exception as exc:
                 logger.warning('Could not parse PlayAir participants for %s: %s', event_url, exc)
 
+    try:
+        validate_url_for_request(normalize_url_for_request(event_url), request_policy)
+    except URLBlockedError as exc:
+        raise URLBlockedError(f'Blocked event URL {sanitize_url_for_log(event_url)}: {exc}') from exc
+
     if event_url.startswith('http'):
-        event_html = get_page_with_retry(event_url, retries=1, custom_headers=custom_headers)
+        event_html = safe_get(event_url, retries=1, custom_headers=custom_headers, policy=request_policy)
         if event_html:
             html_data = scrape_event_details(event_html, event_url, source)
             if not image or 'playair' not in list_url:
@@ -385,11 +396,12 @@ def save_event(event, summary, is_first_run):
 
     if custom_url:
         try:
+            validate_url_for_request(custom_url, build_request_policy(custom_url))
             tags = 'new,tada' if is_new else 'warning'
             headers = {'Title': title.encode('utf-8'), 'Click': event['link'], 'Tags': tags}
             requests.post(custom_url, data=msg.encode('utf-8'), headers=headers, timeout=5)
         except Exception as exc:
-            logger.error('Error sending custom ntfy for %s: %s', title, exc)
+            logger.error('Error sending custom ntfy for %s to %s: %s', title, sanitize_url_for_log(custom_url), exc)
     else:
         send_alert(title, msg, tags=['new', 'tada'] if is_new else ['warning'])
 
@@ -405,19 +417,24 @@ def active_sources():
 
 def parse_custom_headers(source):
     if not source.get('request_headers'):
-        return None
+        return None, {}
     try:
-        return json.loads(source['request_headers'])
+        raw_headers = json.loads(source['request_headers'])
+        if not isinstance(raw_headers, dict):
+            logger.warning('Ignoring non-object request headers for %s', source.get('name'))
+            return None, {}
+        headers, controls = split_header_controls(raw_headers)
+        return headers, controls
     except Exception as exc:
         logger.error('Could not parse request headers for %s: %s', source.get('name'), exc)
-        return None
+        return None, {}
 
 
-def process_api_source(source, list_url, custom_headers, summary, is_first_run):
+def process_api_source(source, list_url, custom_headers, request_policy, summary, is_first_run):
     if '{TODAY}' in list_url:
         list_url = list_url.replace('{TODAY}', datetime.now().strftime('%Y-%m-%dT00:00:00.000Z'))
 
-    response_text = get_page_with_retry(list_url, custom_headers=custom_headers)
+    response_text = safe_get(list_url, custom_headers=custom_headers, policy=request_policy)
     if not response_text:
         logger.warning('Could not fetch API data: %s', list_url)
         return
@@ -438,15 +455,18 @@ def process_api_source(source, list_url, custom_headers, summary, is_first_run):
 
     for evt in events_array:
         try:
-            event = build_api_event(evt, source, list_url, custom_headers)
+            event = build_api_event(evt, source, list_url, custom_headers, request_policy)
             save_event(event, summary, is_first_run)
+        except URLBlockedError as exc:
+            summary.rejected += 1
+            logger.warning('Rejected API event from %s: %s', source.get('name'), exc)
         except Exception:
             summary.rejected += 1
             logger.exception('Failed to process API event from %s', source.get('name'))
 
 
-def process_html_source(source, list_url, custom_headers, summary, is_first_run):
-    list_html = get_page_with_retry(list_url, custom_headers=custom_headers)
+def process_html_source(source, list_url, custom_headers, request_policy, summary, is_first_run):
+    list_html = safe_get(list_url, custom_headers=custom_headers, policy=request_policy)
     if not list_html:
         logger.warning('Could not fetch list from %s', list_url)
         return
@@ -464,7 +484,7 @@ def process_html_source(source, list_url, custom_headers, summary, is_first_run)
 
     for event_url in event_urls:
         try:
-            event_html = get_page_with_retry(event_url, custom_headers=custom_headers)
+            event_html = safe_get(event_url, custom_headers=custom_headers, policy=request_policy)
             if not event_html:
                 summary.rejected += 1
                 logger.warning('Rejected event %s: fetch_failed', event_url)
@@ -494,34 +514,60 @@ def process_html_source(source, list_url, custom_headers, summary, is_first_run)
 
 
 def run_scraper(is_first_run=False):
-    logger.info('Starting scrape run...')
     summary = ScrapeSummary()
-
-    try:
-        sources = active_sources()
-    except Exception:
-        logger.exception('Could not load scraping sources.')
+    if not _RUN_LOCK.acquire(blocking=False):
+        summary.skipped = True
+        logger.warning('Scrape run skipped because another run is active in this process.')
         return summary.as_dict()
 
-    for source in sources:
-        summary.sources += 1
-        list_url = source['list_url']
-        custom_headers = parse_custom_headers(source)
-        try:
-            if source.get('is_api') == 1:
-                logger.info('Starting API source: %s (%s)', source.get('name'), list_url)
-                process_api_source(source, list_url, custom_headers, summary, is_first_run)
-            else:
-                logger.info('Starting HTML source: %s (%s)', source.get('name'), list_url)
-                process_html_source(source, list_url, custom_headers, summary, is_first_run)
-        except Exception:
-            summary.rejected += 1
-            logger.exception('Source failed: %s', source.get('name'))
-
-    summary_payload = summary.as_dict()
-    logger.info('Scrape run completed. Summary: %s', summary_payload)
+    lease_owner = f'{socket.gethostname()}:{os.getpid()}:{uuid.uuid4()}'
+    lease_seconds = int(os.getenv('SCRAPE_LEASE_SECONDS', '1800'))
     try:
+        if not acquire_scrape_lease(lease_owner, ttl_seconds=lease_seconds):
+            summary.skipped = True
+            logger.warning('Scrape run skipped because another process holds the lease.')
+            return summary.as_dict()
+
+        logger.info('Starting scrape run...')
+        update_status('last_scrape_started_at', datetime.now(timezone.utc).isoformat())
+        update_status('last_scrape_status', 'running')
+
+        try:
+            sources = active_sources()
+        except Exception:
+            logger.exception('Could not load scraping sources.')
+            update_status('last_scrape_status', 'failed')
+            return summary.as_dict()
+
+        for source in sources:
+            summary.sources += 1
+            list_url = source['list_url']
+            custom_headers, header_controls = parse_custom_headers(source)
+            request_policy = build_request_policy(list_url, header_controls)
+            try:
+                validate_url_for_request(normalize_url_for_request(list_url), request_policy)
+                if source.get('is_api') == 1:
+                    logger.info('Starting API source: %s (%s)', source.get('name'), sanitize_url_for_log(list_url))
+                    process_api_source(source, list_url, custom_headers, request_policy, summary, is_first_run)
+                else:
+                    logger.info('Starting HTML source: %s (%s)', source.get('name'), sanitize_url_for_log(list_url))
+                    process_html_source(source, list_url, custom_headers, request_policy, summary, is_first_run)
+            except URLBlockedError as exc:
+                summary.rejected += 1
+                logger.warning('Rejected source %s: %s', source.get('name'), exc)
+            except Exception:
+                summary.rejected += 1
+                logger.exception('Source failed: %s', source.get('name'))
+
+        summary_payload = summary.as_dict()
+        logger.info('Scrape run completed. Summary: %s', summary_payload)
         update_status('last_scrape_summary', json.dumps(summary_payload, ensure_ascii=False))
+        update_status('last_scrape_status', 'success')
+        return summary_payload
     except Exception:
-        logger.exception('Could not write scrape summary.')
-    return summary_payload
+        update_status('last_scrape_status', 'failed')
+        raise
+    finally:
+        update_status('last_scrape_finished_at', datetime.now(timezone.utc).isoformat())
+        release_scrape_lease(lease_owner)
+        _RUN_LOCK.release()
