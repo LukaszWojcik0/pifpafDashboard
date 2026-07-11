@@ -2,36 +2,12 @@ import { getEventById, getEventSnapshots } from '../../queries';
 import EventAvailabilityChart from '../../EventAvailabilityChart';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import db from '../../db';
-import { revalidatePath } from 'next/cache';
 import { getSession, logout } from '../../auth';
 import StatusBadge from '../../StatusBadge';
+import { updateMaxAvailable } from './actions';
+import { Snapshot } from '../../types';
 
 export const dynamic = 'force-dynamic';
-
-export async function updateMaxAvailable(formData: FormData) {
-  'use server';
-  const session = await getSession();
-  if (!session) {
-    throw new Error('Odmowa dostępu. Proszę się zalogować.');
-  }
-
-  const id = formData.get('id') as string;
-  const newMaxStr = formData.get('max') as string;
-  const newMax = parseInt(newMaxStr, 10);
-  
-  // Ekstremalnie ścisła walidacja
-  if (!id || typeof id !== 'string' || isNaN(newMax) || newMax < 0 || newMax > 100000) {
-    console.error("Nieprawidłowa wartość podana przez formularz.");
-    return; 
-  }
-
-  if (db) {
-    db.prepare('UPDATE events SET max_available = ? WHERE id = ?').run(newMax, id);
-    revalidatePath(`/events/${id}`);
-    revalidatePath(`/`);
-  }
-}
 
 export default async function EventPage({ params }: { params: { id: string } }) {
   const { id } = params;
@@ -41,28 +17,26 @@ export default async function EventPage({ params }: { params: { id: string } }) 
   const snapshots = getEventSnapshots(id);
   const session = await getSession();
 
-  // 1. Logika dla wykresu ogólnego (z dnia na dzień)
-  const dailyMap = new Map();
-  snapshots.forEach(s => {
-    if (s.checked_at) {
-      const dateStr = s.checked_at.split('T')[0]; // Pobiera format YYYY-MM-DD
-      dailyMap.set(dateStr, s); // Nadpisuje starsze rekordy z tego samego dnia (zostaje ostatni pomiar w dniu)
+  const dailyMap = new Map<string, Snapshot>();
+  snapshots.forEach((snapshot) => {
+    if (snapshot.checked_at) {
+      const dateStr = snapshot.checked_at.split('T')[0];
+      dailyMap.set(dateStr, snapshot);
     }
   });
   const dailySnapshots = Array.from(dailyMap.values());
 
-  // 2. Logika dla wykresu szczegółowego (wczoraj i dziś)
   const now = new Date();
   const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-  const recentSnapshots = snapshots.filter(s => new Date(s.checked_at) >= startOfYesterday);
+  const recentSnapshots = snapshots.filter((snapshot) => new Date(snapshot.checked_at) >= startOfYesterday);
 
   return (
     <main className="max-w-5xl mx-auto p-4 md:p-8 pt-8 md:pt-12">
       <div className="flex justify-between items-center mb-6">
         <Link href="/" className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium inline-block transition-colors">
-          &larr; Wróć do listy wydarzeń
+          &larr; Wroc do listy wydarzen
         </Link>
-        
+
         {session ? (
           <div className="flex items-center gap-4">
             <Link href="/admin" className="text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors">
@@ -76,11 +50,11 @@ export default async function EventPage({ params }: { params: { id: string } }) 
           </div>
         ) : (
           <Link href="/login" className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-            Zaloguj się
+            Zaloguj sie
           </Link>
         )}
       </div>
-      
+
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm p-6 mb-8 border border-gray-200 dark:border-gray-700">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-4">
           <div className="flex-1">
@@ -97,26 +71,27 @@ export default async function EventPage({ params }: { params: { id: string } }) 
             <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">Maksymalna liczba miejsc</h2>
             <div className="flex items-center gap-4">
               <p className="text-3xl font-bold text-gray-900 dark:text-white">{event.max_available ?? 'Brak danych'}</p>
-              
+
               {session ? (
                 <form action={updateMaxAvailable} className="flex items-center gap-2 ml-4">
                   <input type="hidden" name="id" value={event.id} />
-                  <input 
-                    type="number" 
-                    name="max" 
+                  <input
+                    type="number"
+                    name="max"
                     defaultValue={event.max_available ?? 0}
                     className="w-20 px-2 py-1 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
                     min="0"
+                    max="100000"
                   />
                   <button type="submit" className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors">
                     Zapisz
                   </button>
                 </form>
               ) : (
-                <p className="text-xs text-gray-400 ml-4 italic">Zaloguj się, aby edytować.</p>
+                <p className="text-xs text-gray-400 ml-4 italic">Zaloguj sie, aby edytowac.</p>
               )}
             </div>
-            <p className="text-xs text-gray-400 mt-2">Możesz ręcznie nadpisać ilość biletów, jeśli wydarzenie zostało pobrane po częściowej wyprzedaży.</p>
+            <p className="text-xs text-gray-400 mt-2">Mozesz recznie nadpisac liczbe biletow, jezeli wydarzenie zostalo pobrane po czesciowej wyprzedazy.</p>
           </div>
           <div>
             <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">Ostatnia aktualizacja</h2>
@@ -126,21 +101,21 @@ export default async function EventPage({ params }: { params: { id: string } }) 
       </div>
 
       <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Historia dostępności biletów</h2>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Historia dostepnosci biletow</h2>
         {snapshots.length > 0 ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm p-6 border border-gray-200 dark:border-gray-700">
-              <h3 className="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-200">Ogólny trend (z dnia na dzień)</h3>
+              <h3 className="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-200">Ogolny trend</h3>
               <EventAvailabilityChart snapshots={dailySnapshots} />
             </div>
-            
+
             <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm p-6 border border-gray-200 dark:border-gray-700 flex flex-col">
-              <h3 className="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-200">Szczegółowe (wczoraj i dziś)</h3>
+              <h3 className="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-200">Szczegolowe</h3>
               {recentSnapshots.length > 0 ? (
                 <EventAvailabilityChart snapshots={recentSnapshots} />
               ) : (
                 <div className="flex-1 flex min-h-[200px] items-center justify-center">
-                  <p className="text-gray-500 dark:text-gray-400">Brak zmian w ostatnich dwóch dniach.</p>
+                  <p className="text-gray-500 dark:text-gray-400">Brak zmian w ostatnich dwoch dniach.</p>
                 </div>
               )}
             </div>

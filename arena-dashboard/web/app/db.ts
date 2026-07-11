@@ -1,43 +1,37 @@
 import Database, { Database as DB } from 'better-sqlite3';
-import path from 'path';
 import fs from 'fs';
+import path from 'path';
 
-const localEventsDb = path.join(process.cwd(), "../../events.db");
-const fallbackDb = path.join(process.cwd(), "../data/app.db");
+const CANONICAL_SCHEMA_VERSION = 4;
+const localEventsDb = path.join(process.cwd(), '../../events.db');
+const localAppDb = path.join(process.cwd(), '../data/app.db');
 
-// Używamy pliku events.db z głównego katalogu (jeśli istnieje) lub app.db
-const dbPath =
-  process.env.DATABASE_PATH ||
-  (fs.existsSync(localEventsDb) ? localEventsDb : fallbackDb);
+const dbPath = process.env.DATABASE_PATH || (fs.existsSync(localEventsDb) ? localEventsDb : localAppDb);
 
 let db: DB | null = null;
 
-// Ta funkcja zapobiega próbie połączenia z plikiem bazy danych podczas procesu budowania (npm run build),
-// kiedy plik fizycznie nie istnieje w kontenerze budującym.
+function assertCanonicalSchema(database: DB) {
+  const migration = database
+    .prepare("SELECT max(version) AS version FROM schema_migrations")
+    .get() as { version: number | null } | undefined;
+  const version = Number(migration?.version ?? 0);
+  if (version < CANONICAL_SCHEMA_VERSION) {
+    throw new Error(
+      `SQLite schema version ${version} is not supported. Run: python migrate_db.py --database ${dbPath}`,
+    );
+  }
+}
+
 if (process.env.npm_lifecycle_event !== 'build') {
   try {
     db = new Database(dbPath);
+    db.pragma('foreign_keys = ON');
     db.pragma('journal_mode = WAL');
-
-    // Inicjalizacja tabel autoryzacji
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS users (
-        username TEXT PRIMARY KEY,
-        password_hash TEXT NOT NULL,
-        salt TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS sessions (
-        token TEXT PRIMARY KEY,
-        username TEXT NOT NULL,
-        expires_at DATETIME NOT NULL
-      );
-    `);
+    assertCanonicalSchema(db);
   } catch (error) {
-    console.error("Błąd połączenia z bazą danych:", error);
-    db = null; // Upewniamy się, że db jest null w razie błędu
+    console.error('Blad polaczenia z kanoniczna baza SQLite:', error);
+    db = null;
   }
-} else {
-  console.log("Jesteśmy w trakcie budowania (build), pomijam połączenie z bazą danych.");
 }
 
 export default db;

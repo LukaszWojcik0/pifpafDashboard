@@ -1,0 +1,1 @@
+-- Empty database fixture. The test harness creates the file without tables.
