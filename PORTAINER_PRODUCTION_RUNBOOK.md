@@ -37,6 +37,8 @@ Zmienne używane przez stack:
 - `CLOUDFLARE_TUNNEL_TOKEN`
 - `ADMIN_SETUP_TOKEN`
 
+Haslo wejscia na publiczny dashboard nie jest zmienna srodowiskowa. Jest zapisane w SQLite w tabeli `system_status` jako hash i salt. Jezeli nie ustawiono osobnego hasla strony, aplikacja przyjmuje haslo pierwszego administratora jako haslo wejscia.
+
 DO WERYFIKACJI W PORTAINERZE: czy stack jest wdrażany z Git, Web editor, czy uploadu Compose.
 
 ## Pierwsze wdrożenie
@@ -190,13 +192,26 @@ Pozytywne wyniki:
 ## Test po wdrożeniu
 
 1. Otwórz dashboard.
-2. Sprawdź, czy nie ma banera o nieaktualnych danych.
-3. Jeżeli baner jest widoczny, sprawdź ostatni sukces scrapera i logi `arena-scraper`.
-4. Otwórz szczegóły wydarzenia.
-5. Sprawdź wykres historii.
-6. Zaloguj się jako administrator.
-7. Otwórz panel admina.
-8. Nie wykonuj zmian produkcyjnych, jeśli nie są potrzebne.
+2. Jezeli pojawi sie `/access`, wpisz haslo wejscia na dashboard.
+3. Sprawdź, czy nie ma banera o nieaktualnych danych.
+4. Jeżeli baner jest widoczny, sprawdź ostatni sukces scrapera i logi `arena-scraper`.
+5. Otwórz szczegóły wydarzenia.
+6. Sprawdź wykres historii.
+7. Zaloguj się jako administrator.
+8. Otwórz panel admina.
+9. Nie wykonuj zmian produkcyjnych, jeśli nie są potrzebne.
+
+## Reset hasla wejscia na dashboard
+
+Jezeli zapomnisz osobnego hasla wejscia na dashboard, mozesz usunac jego hash z `system_status`. Wtedy aplikacja wroci do uzywania hasla pierwszego administratora jako hasla wejscia.
+
+Uruchom w konsoli `arena-web` albo kontenera pomocniczego z wolumenem `/data`:
+
+```bash
+python -c 'import sqlite3; con=sqlite3.connect("/data/app.db"); con.execute("delete from system_status where key in (\"site_access_password_hash\", \"site_access_password_salt\")"); con.commit(); print("site access password reset to admin password fallback")'
+```
+
+Nie usuwa to konta administratora ani sesji admina.
 
 ## Rollback obrazu
 

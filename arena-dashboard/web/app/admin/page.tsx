@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache';
 import { getAdminEvents } from '../queries';
 import { eventVisibilityLabel } from '../eventVisibility.mjs';
 import SourceForm from '../../components/SourceForm';
+import { changeSiteAccessPassword, requireSiteAccess } from '../siteAccess';
 
 export const dynamic = 'force-dynamic';
 
@@ -101,6 +102,7 @@ export default async function AdminPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
+  await requireSiteAccess();
   const session = await getSession();
   if (!session) redirect('/login');
 
@@ -142,31 +144,57 @@ export default async function AdminPage({
       </div>
 
       {currentTab === 'sources' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-1 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700">
-            <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Dodaj nowe zrodlo wydarzen</h2>
-            <SourceForm action={addSource} />
+        <div className="space-y-8">
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700">
+            <h2 className="text-xl font-semibold mb-2 text-gray-900 dark:text-white">Haslo wejscia na dashboard</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              To haslo jest wymagane przed wejsciem na publiczna czesc strony. Sesja trwa 14 dni.
+            </p>
+            {resolvedSearchParams.accessPassword === 'changed' && (
+              <p className="text-sm text-green-600 dark:text-green-400 mb-4">Haslo strony zostalo zmienione.</p>
+            )}
+            <form action={changeSiteAccessPassword} className="flex flex-col sm:flex-row gap-3">
+              <input
+                type="password"
+                name="site_password"
+                minLength={8}
+                maxLength={128}
+                required
+                placeholder="Nowe haslo strony"
+                className="w-full sm:max-w-sm px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+              <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">
+                Zapisz haslo
+              </button>
+            </form>
           </div>
 
-          <div className="lg:col-span-2 space-y-4">
-            <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Podlaczone serwisy ({sources.length})</h2>
-            {sources.map((src) => (
-              <div key={src.id} className="bg-white dark:bg-gray-800 p-5 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 relative">
-                <form action={deleteSource} className="absolute top-5 right-5">
-                  <input type="hidden" name="id" value={src.id} />
-                  <button type="submit" className="text-red-500 hover:text-red-700 text-sm font-medium p-1">Usun</button>
-                </form>
-                <div className="flex justify-between items-start mb-2">
-                  <h3 className="font-bold text-lg text-gray-900 dark:text-white">
-                    {src.name} {src.is_active ? 'aktywny' : 'wylaczony'} {src.is_api === 1 ? 'API' : 'HTML'}
-                  </h3>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-1 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700">
+              <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Dodaj nowe zrodlo wydarzen</h2>
+              <SourceForm action={addSource} />
+            </div>
+
+            <div className="lg:col-span-2 space-y-4">
+              <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Podlaczone serwisy ({sources.length})</h2>
+              {sources.map((src) => (
+                <div key={src.id} className="bg-white dark:bg-gray-800 p-5 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 relative">
+                  <form action={deleteSource} className="absolute top-5 right-5">
+                    <input type="hidden" name="id" value={src.id} />
+                    <button type="submit" className="text-red-500 hover:text-red-700 text-sm font-medium p-1">Usun</button>
+                  </form>
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-bold text-lg text-gray-900 dark:text-white">
+                      {src.name} {src.is_active ? 'aktywny' : 'wylaczony'} {src.is_api === 1 ? 'API' : 'HTML'}
+                    </h3>
+                  </div>
+                  <a href={src.list_url} target="_blank" rel="noreferrer" className="text-blue-500 text-sm hover:underline break-all mb-4 block pr-12">
+                    {src.list_url}
+                  </a>
+                  <p className="text-xs text-gray-500 font-mono">Tytul: {src.title_selector || 'Domyslny'}</p>
                 </div>
-                <a href={src.list_url} target="_blank" rel="noreferrer" className="text-blue-500 text-sm hover:underline break-all mb-4 block pr-12">
-                  {src.list_url}
-                </a>
-                <p className="text-xs text-gray-500 font-mono">Tytul: {src.title_selector || 'Domyslny'}</p>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -196,6 +224,7 @@ export default async function AdminPage({
                     </span>
                   </div>
                   <div className="text-sm text-gray-500 dark:text-gray-400 mt-1 flex flex-col sm:flex-row sm:gap-4">
+                    <span>Zrodlo: {evt.source_name || 'Nieznane'}</span>
                     <span>Data: {evt.event_date || 'Brak'}</span>
                     <span>Status: {evt.status || 'Brak'}</span>
                     <span>Miejsca: {evt.current_available ?? '?'}/{evt.max_available ?? '?'}</span>

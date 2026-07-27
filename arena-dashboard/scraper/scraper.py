@@ -463,6 +463,7 @@ def build_api_event(evt, source, list_url, custom_headers, request_policy):
         'measurement_known': tickets.known,
         'rejection_reason': tickets.reason,
         'image_url': str(image) if image else None,
+        'source_id': source.get('id'),
         'custom_ntfy_url': source.get('ntfy_url'),
         'custom_ntfy_template': source.get('ntfy_template'),
     }
@@ -476,6 +477,7 @@ def save_event(event, summary, is_first_run):
         event['date_info'],
         event['available_places'] if event['measurement_known'] else None,
         event.get('image_url'),
+        event.get('source_id'),
     )
 
     if is_new:
@@ -654,6 +656,7 @@ def process_html_source(source, list_url, custom_headers, request_policy, summar
                 'measurement_known': event_data['measurement_known'],
                 'rejection_reason': event_data['rejection_reason'],
                 'image_url': event_data['image_url'],
+                'source_id': source.get('id'),
                 'custom_ntfy_url': source.get('ntfy_url'),
                 'custom_ntfy_template': source.get('ntfy_template'),
             }

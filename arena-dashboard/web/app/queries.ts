@@ -6,18 +6,20 @@ export function getEvents(): Event[] {
   if (!db) return [];
   const stmt = db.prepare(`
     SELECT
-      id,
-      title,
-      url AS link,
-      event_date,
-      event_time,
-      status,
-      max_available,
-      current_available,
-      image_url,
-      last_seen
+      events.id,
+      events.title,
+      events.url AS link,
+      events.event_date,
+      events.event_time,
+      events.status,
+      events.max_available,
+      events.current_available,
+      events.image_url,
+      events.last_seen,
+      scraping_sources.name AS source_name
     FROM events
-    ORDER BY last_seen DESC
+    LEFT JOIN scraping_sources ON scraping_sources.id = events.source_id
+    ORDER BY events.last_seen DESC
   `);
   return stmt.all() as Event[];
 }
@@ -41,18 +43,20 @@ export function getEventById(id: string): Event | null {
   if (!db) return null;
   const stmt = db.prepare(`
     SELECT
-      id,
-      title,
-      url AS link,
-      event_date,
-      event_time,
-      status,
-      max_available,
-      current_available,
-      image_url,
-      last_seen
+      events.id,
+      events.title,
+      events.url AS link,
+      events.event_date,
+      events.event_time,
+      events.status,
+      events.max_available,
+      events.current_available,
+      events.image_url,
+      events.last_seen,
+      scraping_sources.name AS source_name
     FROM events
-    WHERE id = ?
+    LEFT JOIN scraping_sources ON scraping_sources.id = events.source_id
+    WHERE events.id = ?
   `);
   return (stmt.get(id) as Event) || null;
 }

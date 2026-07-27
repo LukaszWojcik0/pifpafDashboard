@@ -1,10 +1,10 @@
 'use server';
 
 import crypto from 'crypto';
-import { promisify } from 'util';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import db from './db';
+import { hashPassword, randomSalt, safeCompareHex } from './passwordCrypto';
 import {
   isSecureCookieEnabled,
   loginRateLimiter,
@@ -12,8 +12,6 @@ import {
   validateCredentials,
   verifySetupToken,
 } from './authPolicy.mjs';
-
-const pbkdf2 = promisify(crypto.pbkdf2);
 
 type UserRecord = {
   username: string;
@@ -23,17 +21,6 @@ type UserRecord = {
 
 function redirectWithError(path: string, message: string): never {
   redirect(`${path}?error=${encodeURIComponent(message)}`);
-}
-
-async function hashPassword(password: string, salt: string): Promise<string> {
-  const derivedKey = await pbkdf2(password, salt, 310000, 64, 'sha512');
-  return derivedKey.toString('hex');
-}
-
-function safeCompareHex(value: string, expected: string): boolean {
-  const valueBuffer = Buffer.from(value, 'hex');
-  const expectedBuffer = Buffer.from(expected, 'hex');
-  return valueBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(valueBuffer, expectedBuffer);
 }
 
 async function clientAddress(): Promise<string> {
@@ -87,7 +74,7 @@ export async function setupUser(formData: FormData) {
     redirectWithError('/setup', setupToken.reason ?? 'Nieprawidlowy token pierwszej konfiguracji.');
   }
 
-  const salt = crypto.randomBytes(16).toString('hex');
+  const salt = randomSalt();
   const hash = await hashPassword(password, salt);
 
   const createFirstAdmin = database.transaction(() => {

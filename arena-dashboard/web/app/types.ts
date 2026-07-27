@@ -9,6 +9,7 @@ export interface Event {
   current_available: number | null;
   image_url: string | null;
   last_seen: string;
+  source_name: string | null;
 }
 
 export interface AdminEvent extends Event {
