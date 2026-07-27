@@ -1,4 +1,5 @@
 import os
+import socket
 import sqlite3
 import sys
 import tempfile
@@ -103,6 +104,17 @@ class EventUrlTests(unittest.TestCase):
         self.assertIn('https://arenawalki.pl/wydarzenie/stary-format', urls)
         self.assertEqual(urls.count('https://arenawalki.pl/events/arena-open-alpha'), 1)
         self.assertNotIn('https://arenawalki.pl/kontakt', urls)
+        self.assertNotIn('https://arenawalki.pl/sklep', urls)
+
+    def test_extracts_polish_date_from_current_list_card(self):
+        candidates = scraper.get_event_candidates(
+            fixture('current_list.html'),
+            'https://arenawalki.pl/gry-otwarte/',
+            'a[href*="/produkt/"], a[href*="/wydarzenie/"]',
+        )
+        alpha = next(item for item in candidates if item['url'] == 'https://arenawalki.pl/events/arena-open-alpha')
+        self.assertEqual(alpha['date'], '2026-08-01')
+        self.assertEqual(alpha['title'], 'Alpha Arena')
 
     def test_no_events_page_returns_no_urls(self):
         urls = scraper.get_event_urls(fixture('no_events.html'), 'https://arenawalki.pl/gry-otwarte/', None)
@@ -427,6 +439,41 @@ class RunScraperTests(TempDbTest):
 
         self.assertTrue(db.acquire_scrape_lease('new-owner', ttl_seconds=60))
         db.release_scrape_lease('new-owner')
+
+    def test_future_local_process_relic_lease_is_reclaimed(self):
+        old_owner = f'{socket.gethostname()}:{os.getpid()}:old-run'
+        conn = sqlite3.connect(db.DB_PATH)
+        try:
+            conn.execute("INSERT INTO system_status (key, value) VALUES ('scrape_lock_owner', ?)", (old_owner,))
+            conn.execute("INSERT INTO system_status (key, value) VALUES ('scrape_lock_expires_at', '2999-01-01T00:00:00Z')")
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.assertTrue(db.acquire_scrape_lease(f'{socket.gethostname()}:{os.getpid()}:new-run', ttl_seconds=60))
+
+    def test_future_foreign_lease_is_not_reclaimed(self):
+        conn = sqlite3.connect(db.DB_PATH)
+        try:
+            conn.execute("INSERT INTO system_status (key, value) VALUES ('scrape_lock_owner', 'other-host:999999:old-run')")
+            conn.execute("INSERT INTO system_status (key, value) VALUES ('scrape_lock_expires_at', '2999-01-01T00:00:00Z')")
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.assertFalse(db.acquire_scrape_lease(f'{socket.gethostname()}:{os.getpid()}:new-run', ttl_seconds=60))
+
+    def test_lease_default_tracks_short_scheduler_interval(self):
+        with patch.dict(os.environ, {'SCRAPE_INTERVAL_MINUTES': '1', 'SCRAPE_LEASE_SECONDS': ''}):
+            self.assertEqual(scraper.configured_lease_seconds(), 120)
+
+    def test_lease_can_be_renewed_by_owner(self):
+        owner = f'{socket.gethostname()}:{os.getpid()}:renew'
+        self.assertTrue(db.acquire_scrape_lease(owner, ttl_seconds=30))
+        self.assertTrue(db.renew_scrape_lease(owner, ttl_seconds=60))
+        state = db.get_scrape_lease_state()
+        self.assertEqual(state['owner'], owner)
+        self.assertTrue(state['active'])
 
 
 if __name__ == '__main__':
