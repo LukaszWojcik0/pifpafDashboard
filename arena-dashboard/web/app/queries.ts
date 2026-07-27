@@ -1,6 +1,7 @@
 import db from './db';
 import { AdminEvent, Event, ScraperStatus, Snapshot } from './types';
 import { classifyEvent, eventVisibilityReason } from './eventVisibility.mjs';
+import { calculateCumulativePlayers } from './playerCounts.mjs';
 
 export function getEvents(): Event[] {
   if (!db) return [];
@@ -16,12 +17,13 @@ export function getEvents(): Event[] {
       events.current_available,
       events.image_url,
       events.last_seen,
-      scraping_sources.name AS source_name
+      scraping_sources.name AS source_name,
+      NULL AS potential_players
     FROM events
     LEFT JOIN scraping_sources ON scraping_sources.id = events.source_id
     ORDER BY events.last_seen DESC
   `);
-  return stmt.all() as Event[];
+  return withPotentialPlayers(stmt.all() as Event[]);
 }
 
 export function getPublicEvents(): Event[] {
@@ -53,12 +55,14 @@ export function getEventById(id: string): Event | null {
       events.current_available,
       events.image_url,
       events.last_seen,
-      scraping_sources.name AS source_name
+      scraping_sources.name AS source_name,
+      NULL AS potential_players
     FROM events
     LEFT JOIN scraping_sources ON scraping_sources.id = events.source_id
     WHERE events.id = ?
   `);
-  return (stmt.get(id) as Event) || null;
+  const event = (stmt.get(id) as Event) || null;
+  return event ? withPotentialPlayers([event])[0] : null;
 }
 
 export function getEventSnapshots(eventId: string, limit = 1000): Snapshot[] {
@@ -88,6 +92,28 @@ function numberOrNull(value: string | null): number | null {
   if (!value) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function calculatePotentialPlayers(event: Event): number | null {
+  if (!db || event.max_available === null || event.max_available === undefined) return null;
+  const rows = db.prepare(`
+    SELECT available
+    FROM snapshots
+    WHERE event_id = ? AND available IS NOT NULL
+    ORDER BY checked_at ASC, id ASC
+  `).all(event.id) as { available: number }[];
+  return calculateCumulativePlayers(
+    event.max_available,
+    rows.map((row) => row.available),
+    event.current_available,
+  );
+}
+
+function withPotentialPlayers(events: Event[]): Event[] {
+  return events.map((event) => ({
+    ...event,
+    potential_players: calculatePotentialPlayers(event),
+  }));
 }
 
 function staleAfterMinutes(): number {

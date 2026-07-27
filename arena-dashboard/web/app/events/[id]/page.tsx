@@ -78,9 +78,9 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-6">
           <div>
-            <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">Maksymalna liczba miejsc</h2>
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">Potencjalna liczba graczy</h2>
             <div className="flex items-center gap-4">
-              <p className="text-3xl font-bold text-gray-900 dark:text-white">{event.max_available ?? 'Brak danych'}</p>
+              <p className="text-3xl font-bold text-gray-900 dark:text-white">{event.potential_players ?? 'Brak danych'}</p>
 
               {session ? (
                 <form action={updateMaxAvailable} className="flex items-center gap-2 ml-4">
@@ -101,7 +101,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
                 <p className="text-xs text-gray-400 ml-4 italic">Zaloguj sie, aby edytowac.</p>
               )}
             </div>
-            <p className="text-xs text-gray-400 mt-2">Mozesz recznie nadpisac liczbe biletow, jezeli wydarzenie zostalo pobrane po czesciowej wyprzedazy.</p>
+            <p className="text-xs text-gray-400 mt-2">Liczba graczy nie spada przy resecie puli miejsc. Mozesz recznie nadpisac maksymalna liczbe miejsc, jezeli wydarzenie zostalo pobrane po czesciowej wyprzedazy.</p>
           </div>
           <div>
             <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">Ostatnia aktualizacja</h2>
