@@ -12,7 +12,10 @@ export const dynamic = 'force-dynamic';
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const event = getEventById(id);
-  if (!event) return notFound();
+  if (!event) {
+    console.warn(`Event details requested for missing event id: ${id}`);
+    return notFound();
+  }
 
   const snapshots = getEventSnapshots(id);
   const session = await getSession();
