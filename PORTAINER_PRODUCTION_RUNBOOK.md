@@ -182,6 +182,12 @@ http://localhost:3000/api/ready
 
 W obecnym hostingu `web` działa w przestrzeni sieciowej `vpn`, więc z zewnątrz sprawdzaj przez port publikowany przez `vpn` albo przez Cloudflare Tunnel.
 
+Healthcheck kontenera `web` w Compose sprawdza:
+
+```text
+http://127.0.0.1:3000/api/ready
+```
+
 Pozytywne wyniki:
 
 - `/api/health`: HTTP 200
@@ -257,7 +263,6 @@ Uruchom:
 
 Nie są wymagane do poprawnego działania:
 
-- zmiana healthchecka `web` z `/` na `/api/ready`
 - osobny ręczny stack testowy używający `docker-compose.test.yml`
 - harmonogram okresowego backupu przez kontener pomocniczy
 

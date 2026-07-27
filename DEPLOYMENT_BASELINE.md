@@ -51,7 +51,7 @@ Usługi:
   - używa `HOSTNAME=0.0.0.0`
   - działa z `network_mode: "service:vpn"`
   - `depends_on: [vpn]`
-  - healthcheck sprawdza `http://localhost:3000/` z wnętrza współdzielonej przestrzeni sieciowej
+  - healthcheck sprawdza `http://127.0.0.1:3000/api/ready` z wnętrza współdzielonej przestrzeni sieciowej
 
 - `cloudflared`
   - obraz: `cloudflare/cloudflared:latest`
@@ -118,7 +118,7 @@ Produkcja:
 - kontener/przestrzeń Gluetun: `3000/tcp`
 - aplikacja Next.js: `3000`
 
-Healthcheck `web` używa `http://localhost:3000/`.
+Healthcheck `web` używa `http://127.0.0.1:3000/api/ready`.
 
 Test:
 
