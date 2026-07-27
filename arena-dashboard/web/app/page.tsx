@@ -1,4 +1,4 @@
-import { getEvents, getScraperStatus } from './queries';
+import { getPublicEvents, getScraperStatus } from './queries';
 import EventsTable from './EventsTable';
 import { getSession, logout } from './auth';
 import Link from 'next/link';
@@ -7,7 +7,7 @@ import ScraperStatusBanner from './ScraperStatusBanner';
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
-  const events = getEvents();
+  const events = getPublicEvents();
   const scraperStatus = getScraperStatus();
   const session = await getSession();
 

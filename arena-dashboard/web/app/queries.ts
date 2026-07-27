@@ -1,5 +1,6 @@
 import db from './db';
-import { Event, ScraperStatus, Snapshot } from './types';
+import { AdminEvent, Event, ScraperStatus, Snapshot } from './types';
+import { classifyEvent, eventVisibilityReason } from './eventVisibility.mjs';
 
 export function getEvents(): Event[] {
   if (!db) return [];
@@ -19,6 +20,21 @@ export function getEvents(): Event[] {
     ORDER BY last_seen DESC
   `);
   return stmt.all() as Event[];
+}
+
+export function getPublicEvents(): Event[] {
+  return getEvents().filter((event) => classifyEvent(event) === 'public');
+}
+
+export function getAdminEvents(): AdminEvent[] {
+  return getEvents().map((event) => {
+    const visibility = classifyEvent(event);
+    return {
+      ...event,
+      visibility,
+      visibility_reason: eventVisibilityReason(event),
+    };
+  });
 }
 
 export function getEventById(id: string): Event | null {

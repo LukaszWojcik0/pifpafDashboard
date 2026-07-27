@@ -104,6 +104,17 @@ class EventUrlTests(unittest.TestCase):
         self.assertIn('https://arenawalki.pl/wydarzenie/stary-format', urls)
         self.assertEqual(urls.count('https://arenawalki.pl/events/arena-open-alpha'), 1)
         self.assertNotIn('https://arenawalki.pl/kontakt', urls)
+        self.assertNotIn('https://arenawalki.pl/sklep', urls)
+
+    def test_extracts_polish_date_from_current_list_card(self):
+        candidates = scraper.get_event_candidates(
+            fixture('current_list.html'),
+            'https://arenawalki.pl/gry-otwarte/',
+            'a[href*="/produkt/"], a[href*="/wydarzenie/"]',
+        )
+        alpha = next(item for item in candidates if item['url'] == 'https://arenawalki.pl/events/arena-open-alpha')
+        self.assertEqual(alpha['date'], '2026-08-01')
+        self.assertEqual(alpha['title'], 'Alpha Arena')
 
     def test_no_events_page_returns_no_urls(self):
         urls = scraper.get_event_urls(fixture('no_events.html'), 'https://arenawalki.pl/gry-otwarte/', None)

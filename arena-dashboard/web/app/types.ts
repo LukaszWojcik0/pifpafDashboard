@@ -11,6 +11,11 @@ export interface Event {
   last_seen: string;
 }
 
+export interface AdminEvent extends Event {
+  visibility: 'public' | 'needs_review' | 'past';
+  visibility_reason: string;
+}
+
 export interface Snapshot {
   id: number;
   event_id: string;

@@ -46,6 +46,22 @@ DEFAULT_SOLD_OUT_REGEX = r'wyprzedane|brak biletow|brak biletów|brak w magazyni
 EVENT_PATH_RE = re.compile(r'^/(?:produkt|wydarzenie|events)/[^/]', re.IGNORECASE)
 TRACKING_QUERY_PREFIXES = ('utm_',)
 TRACKING_QUERY_KEYS = {'fbclid', 'gclid', 'mc_cid', 'mc_eid'}
+POLISH_MONTHS = {
+    'stycznia': 1,
+    'lutego': 2,
+    'marca': 3,
+    'kwietnia': 4,
+    'maja': 5,
+    'czerwca': 6,
+    'lipca': 7,
+    'sierpnia': 8,
+    'wrzesnia': 9,
+    'września': 9,
+    'pazdziernika': 10,
+    'października': 10,
+    'listopada': 11,
+    'grudnia': 12,
+}
 
 
 @dataclass
@@ -140,6 +156,85 @@ def get_page_with_retry(url, retries=3, backoff_factor=1, custom_headers=None):
     )
 
 
+def parse_event_date_text(text):
+    value = (text or '').strip()
+    iso_match = re.search(r'\b(\d{4}-\d{2}-\d{2})\b', value)
+    if iso_match:
+        return iso_match.group(1)
+
+    polish_match = re.search(
+        r'\b(\d{1,2})\s+([A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ]+)\s+(\d{4})\b',
+        value,
+        re.IGNORECASE,
+    )
+    if not polish_match:
+        return None
+
+    day = int(polish_match.group(1))
+    raw_month = polish_match.group(2).lower()
+    normalized_month = normalize_playair_string(raw_month).replace('-', '')
+    month = POLISH_MONTHS.get(raw_month) or POLISH_MONTHS.get(normalized_month)
+    year = int(polish_match.group(3))
+    if not month:
+        return None
+    return f'{year:04d}-{month:02d}-{day:02d}'
+
+
+def candidate_context(link):
+    node = link
+    for _ in range(5):
+        if not node:
+            break
+        text = node.get_text(' ', strip=True)
+        if parse_event_date_text(text):
+            return node
+        if node.name in {'article', 'section', 'li', 'div'} and len(text) > 20:
+            return node
+        node = node.parent
+    return link.parent or link
+
+
+def event_candidate_from_link(link, list_url):
+    href = link.get('href')
+    if not href:
+        return None
+    normalized = normalize_url(href, list_url)
+    if normalized == normalize_url(list_url, list_url) or not is_supported_event_url(normalized):
+        return None
+
+    context = candidate_context(link)
+    context_text = context.get_text(' ', strip=True) if context else link.get_text(' ', strip=True)
+    heading = context.find(['h1', 'h2', 'h3', 'h4']) if context else None
+    title = heading.get_text(' ', strip=True) if heading else link.get_text(' ', strip=True)
+    return {
+        'url': normalized,
+        'title': title or None,
+        'date': parse_event_date_text(context_text),
+    }
+
+
+def get_event_candidates(html_content, list_url, link_selector=None):
+    soup = BeautifulSoup(html_content or '', 'html.parser')
+    selected = safe_select(soup, link_selector, 'event links') if link_selector else []
+    default_candidates = soup.find_all('a', href=True)
+    candidates = []
+    by_url = {}
+
+    for link in list(selected) + list(default_candidates):
+        candidate = event_candidate_from_link(link, list_url)
+        if not candidate:
+            continue
+        existing = by_url.get(candidate['url'])
+        if existing:
+            existing['title'] = existing.get('title') or candidate.get('title')
+            existing['date'] = existing.get('date') or candidate.get('date')
+            continue
+        by_url[candidate['url']] = candidate
+        candidates.append(candidate)
+
+    return candidates
+
+
 def safe_select(soup, selector, context):
     if not selector:
         return []
@@ -183,6 +278,10 @@ def get_event_urls(html_content, list_url, link_selector=None):
             event_urls.append(normalized)
 
     return event_urls
+
+
+def get_event_urls(html_content, list_url, link_selector=None):
+    return [candidate['url'] for candidate in get_event_candidates(html_content, list_url, link_selector)]
 
 
 def parse_ticket_count(page_text, tickets_regex=None, soldout_regex=None):
@@ -249,10 +348,11 @@ def scrape_event_details(html_content, event_url, config):
     title_selector = config.get('title_selector') if config else None
     title_element = safe_select_one(soup, title_selector, 'title') if title_selector else soup.find('h1')
     title = title_element.get_text(strip=True) if title_element else None
+    page_text = soup.get_text(separator=' ', strip=True)
     date = first_text(soup, config.get('date_selector'), re.compile(r'date|data', re.I), 'date') if config else None
+    date = parse_event_date_text(date) or parse_event_date_text(page_text) or date
     time_value = first_text(soup, config.get('time_selector'), re.compile(r'time|czas|godzina', re.I), 'time') if config else None
     image_url = first_image_url(soup, event_url, config.get('image_selector') if config else None)
-    page_text = soup.get_text(separator=' ', strip=True)
     tickets = parse_ticket_count(
         page_text,
         config.get('tickets_regex') if config else None,
@@ -514,14 +614,15 @@ def process_html_source(source, list_url, custom_headers, request_policy, summar
         logger.warning('Rejected source %s: antibot_page', source.get('name'))
         return
 
-    event_urls = get_event_urls(list_html, list_url, source.get('list_links_selector'))
-    if not event_urls and is_supported_event_url(normalize_url(list_url, list_url)):
-        event_urls = [normalize_url(list_url, list_url)]
+    event_candidates = get_event_candidates(list_html, list_url, source.get('list_links_selector'))
+    if not event_candidates and is_supported_event_url(normalize_url(list_url, list_url)):
+        event_candidates = [{'url': normalize_url(list_url, list_url), 'title': None, 'date': None}]
 
-    logger.info('Found %s potential events for %s.', len(event_urls), source.get('name'))
-    summary.found += len(event_urls)
+    logger.info('Found %s potential events for %s.', len(event_candidates), source.get('name'))
+    summary.found += len(event_candidates)
 
-    for event_url in event_urls:
+    for candidate in event_candidates:
+        event_url = candidate['url']
         try:
             event_html = safe_get(event_url, custom_headers=custom_headers, policy=request_policy)
             if not event_html:
@@ -530,8 +631,20 @@ def process_html_source(source, list_url, custom_headers, request_policy, summar
                 continue
 
             event_data = scrape_event_details(event_html, event_url, source)
-            title = event_data['title'] or 'Nieznane wydarzenie'
-            date_info = f'{event_data["date"] or ""} {event_data["time"] or ""}'.strip() or 'Unknown Date'
+            title = event_data['title'] or candidate.get('title') or 'Nieznane wydarzenie'
+            event_date = event_data['date'] or candidate.get('date')
+            if candidate.get('date') and not event_data['date']:
+                logger.info('Using list date for %s: %s', event_url, candidate.get('date'))
+            if not event_date:
+                logger.warning(
+                    'Missing event date for source=%s url=%s title=%s date_selector=%s time_selector=%s',
+                    source.get('name'),
+                    sanitize_url_for_log(event_url),
+                    title,
+                    source.get('date_selector'),
+                    source.get('time_selector'),
+                )
+            date_info = f'{event_date or ""} {event_data["time"] or ""}'.strip() or 'Unknown Date'
             event = {
                 'id': event_id_for_url(event_url),
                 'title': title,
