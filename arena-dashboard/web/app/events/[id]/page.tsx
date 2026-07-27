@@ -6,13 +6,18 @@ import { getSession, logout } from '../../auth';
 import StatusBadge from '../../StatusBadge';
 import { updateMaxAvailable } from './actions';
 import { Snapshot } from '../../types';
+import { requireSiteAccess } from '../../siteAccess';
 
 export const dynamic = 'force-dynamic';
 
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireSiteAccess();
   const { id } = await params;
   const event = getEventById(id);
-  if (!event) return notFound();
+  if (!event) {
+    console.warn(`Event details requested for missing event id: ${id}`);
+    return notFound();
+  }
 
   const snapshots = getEventSnapshots(id);
   const session = await getSession();
@@ -59,7 +64,12 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-4">
           <div className="flex-1">
             <h1 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-2">{event.title}</h1>
-            <p className="text-gray-500 dark:text-gray-400">{event.event_date} {event.event_time}</p>
+            <div className="flex flex-wrap items-center gap-2 text-gray-500 dark:text-gray-400">
+              <span className="text-xs font-medium rounded-full bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 px-2 py-1">
+                {event.source_name || 'Nieznane źródło'}
+              </span>
+              <span>{event.event_date} {event.event_time}</span>
+            </div>
           </div>
           <div className="flex-shrink-0">
             <StatusBadge status={event.status} />

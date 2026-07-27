@@ -3,10 +3,12 @@ import EventsTable from './EventsTable';
 import { getSession, logout } from './auth';
 import Link from 'next/link';
 import ScraperStatusBanner from './ScraperStatusBanner';
+import { requireSiteAccess } from './siteAccess';
 
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
+  await requireSiteAccess();
   const events = getPublicEvents();
   const scraperStatus = getScraperStatus();
   const session = await getSession();

@@ -290,7 +290,7 @@ def event_status(available_places):
     return "sold_out" if available_places == 0 else "available"
 
 
-def update_event(event_id, title, link, date_info, available_places, image_url=None):
+def update_event(event_id, title, link, date_info, available_places, image_url=None, source_id=None):
     """Insert/update an event and write a snapshot only for known changed values."""
     conn = get_connection()
     now = utc_now()
@@ -319,9 +319,10 @@ def update_event(event_id, title, link, date_info, available_places, image_url=N
             """
             INSERT INTO events
             (id, title, url, event_date, event_time, status, current_available, max_available,
-             last_seen, created_at, updated_at, image_url)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             last_seen, created_at, updated_at, image_url, source_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                source_id = COALESCE(excluded.source_id, events.source_id),
                 title = excluded.title,
                 url = excluded.url,
                 event_date = excluded.event_date,
@@ -346,6 +347,7 @@ def update_event(event_id, title, link, date_info, available_places, image_url=N
                 normalize_timestamp(row["created_at"]) if row else now,
                 now,
                 image_url,
+                source_id,
             ),
         )
 

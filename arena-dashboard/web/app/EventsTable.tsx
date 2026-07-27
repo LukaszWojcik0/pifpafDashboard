@@ -48,9 +48,14 @@ export default function EventsTable({
                 />
               </Link>
               <div className="p-5 flex flex-col flex-grow">
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">
-                  {event.event_date} {event.event_time}
-                </p>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className="text-xs font-medium rounded-full bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 px-2 py-1">
+                    {event.source_name || "Nieznane źródło"}
+                  </span>
+                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                    {event.event_date} {event.event_time}
+                  </span>
+                </div>
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-3 flex-grow">
                   <Link
                     href={`/events/${event.id}`}
