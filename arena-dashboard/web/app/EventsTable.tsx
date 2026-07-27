@@ -69,13 +69,10 @@ export default function EventsTable({
                   <StatusBadge status={event.status} />
                   <div className="text-right">
                     <p className="font-extrabold text-2xl text-gray-900 dark:text-white">
-                      {event.current_available ?? "?"}
-                      <span className="text-base font-medium text-gray-500 dark:text-gray-400">
-                        /{event.max_available ?? "?"}
-                      </span>
+                      {event.potential_players ?? "?"}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 -mt-1">
-                      miejsc
+                      graczy
                     </p>
                   </div>
                 </div>

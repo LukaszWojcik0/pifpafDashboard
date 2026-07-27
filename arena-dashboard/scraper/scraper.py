@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
-import requests
 from bs4 import BeautifulSoup
 
 from alerts import send_alert
@@ -46,6 +45,7 @@ DEFAULT_SOLD_OUT_REGEX = r'wyprzedane|brak biletow|brak biletów|brak w magazyni
 EVENT_PATH_RE = re.compile(r'^/(?:produkt|wydarzenie|events)/[^/]', re.IGNORECASE)
 TRACKING_QUERY_PREFIXES = ('utm_',)
 TRACKING_QUERY_KEYS = {'fbclid', 'gclid', 'mc_cid', 'mc_eid'}
+UNKNOWN_TITLES = {'', 'brak tytulu', 'brak tytułu', 'nieznane wydarzenie', 'nieznane wydarzenie api', 'untitled event'}
 POLISH_MONTHS = {
     'stycznia': 1,
     'lutego': 2,
@@ -464,12 +464,14 @@ def build_api_event(evt, source, list_url, custom_headers, request_policy):
         'rejection_reason': tickets.reason,
         'image_url': str(image) if image else None,
         'source_id': source.get('id'),
+        'source_name': source.get('name'),
         'custom_ntfy_url': source.get('ntfy_url'),
         'custom_ntfy_template': source.get('ntfy_template'),
     }
 
 
 def save_event(event, summary, is_first_run):
+    previous_state = get_event_state(event['id'])
     is_new, max_available, measurement_known = update_event(
         event['id'],
         event['title'],
@@ -490,31 +492,10 @@ def save_event(event, summary, is_first_run):
         summary.rejected += 1
         logger.info('Rejected measurement for %s: %s', event['link'], event.get('rejection_reason'))
 
-    if is_first_run or not measurement_known:
-        return
-
-    title = event['title']
-    custom_url = event.get('custom_ntfy_url')
-    custom_template = event.get('custom_ntfy_template')
-    if custom_template:
-        msg = custom_template.replace('{title}', str(title)).replace('{available}', str(event['available_places'])).replace('{max}', str(max_available))
-    else:
-        msg = f'dostepna ilosc biletow: {event["available_places"]}/{max_available}'
-
-    should_alert = is_new or (event['available_places'] is not None and 0 < event['available_places'] < 5)
-    if not should_alert:
-        return
-
-    if custom_url:
-        try:
-            validate_url_for_request(custom_url, build_request_policy(custom_url))
-            tags = 'new,tada' if is_new else 'warning'
-            headers = {'Title': title.encode('utf-8'), 'Click': event['link'], 'Tags': tags}
-            requests.post(custom_url, data=msg.encode('utf-8'), headers=headers, timeout=5)
-        except Exception as exc:
-            logger.error('Error sending custom ntfy for %s to %s: %s', title, sanitize_url_for_log(custom_url), exc)
-    else:
-        send_alert(title, msg, tags=['new', 'tada'] if is_new else ['warning'])
+    try:
+        maybe_send_event_notifications(event, previous_state, is_new, max_available, is_first_run)
+    except Exception as exc:
+        logger.error('Error while preparing ntfy alert for %s: %s', event['link'], exc)
 
 
 def active_sources():
@@ -539,6 +520,282 @@ def parse_custom_headers(source):
     except Exception as exc:
         logger.error('Could not parse request headers for %s: %s', source.get('name'), exc)
         return None, {}
+
+
+def alert_on_first_run():
+    return os.getenv('ALERT_ON_FIRST_RUN', 'false').lower() == 'true'
+
+
+def alert_cooldown_seconds():
+    try:
+        minutes = int(os.getenv('NTFY_COOLDOWN_MINUTES', '30'))
+    except ValueError:
+        minutes = 30
+    return max(1, minutes) * 60
+
+
+def _parse_utc_timestamp(value):
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def alert_cooldown_key(scope, alert_type, item_id):
+    safe_id = hashlib.sha256(str(item_id).encode('utf-8')).hexdigest()[:24]
+    return f'ntfy:last_sent:{scope}:{alert_type}:{safe_id}'
+
+
+def alert_allowed(key, cooldown_seconds=None):
+    cooldown_seconds = cooldown_seconds if cooldown_seconds is not None else alert_cooldown_seconds()
+    conn = get_connection()
+    try:
+        row = conn.execute('SELECT value, updated_at FROM system_status WHERE key = ?', (key,)).fetchone()
+        if not row:
+            return True
+        last_sent = _parse_utc_timestamp(row['value']) or _parse_utc_timestamp(row['updated_at'])
+        if not last_sent:
+            return True
+        return (datetime.now(timezone.utc) - last_sent).total_seconds() >= cooldown_seconds
+    finally:
+        conn.close()
+
+
+def mark_alert_sent(key):
+    conn = get_connection()
+    now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    try:
+        conn.execute(
+            """
+            INSERT INTO system_status (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (key, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_event_state(event_id):
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            'SELECT current_available, max_available, status FROM events WHERE id = ?',
+            (event_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def event_requires_review(event):
+    title = str(event.get('title') or '').strip().lower()
+    date_info = str(event.get('date_info') or '').strip().lower()
+    if title in UNKNOWN_TITLES:
+        return True, 'brak pewnego tytulu'
+    if not date_info or date_info in {'unknown date', 'brak daty'}:
+        return True, 'brak pewnej daty'
+    if not event.get('measurement_known'):
+        return True, event.get('rejection_reason') or 'brak pewnego pomiaru miejsc'
+    return False, None
+
+
+def player_count(max_available, available):
+    if max_available is None or available is None:
+        return None
+    if available > max_available:
+        return None
+    return max(0, int(max_available) - int(available))
+
+
+def cumulative_players_for_event(event_id, max_available, current_available=None):
+    if max_available is None:
+        return None
+    try:
+        max_value = int(max_available)
+    except (TypeError, ValueError):
+        return None
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT available
+            FROM snapshots
+            WHERE event_id = ? AND available IS NOT NULL
+            ORDER BY checked_at ASC, id ASC
+            """,
+            (event_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        return player_count(max_value, current_available)
+
+    players = 0
+    previous_available = max_value
+    for row in rows:
+        try:
+            available = int(row['available'])
+        except (TypeError, ValueError):
+            continue
+        if available < previous_available:
+            players += previous_available - available
+        previous_available = available
+    return max(0, players)
+
+
+def sanitize_alert_detail(detail):
+    text = str(detail or '')
+    text = re.sub(r'(?i)(authorization|cookie|api[_-]?key|token|password)\s*[:=]\s*([^&\s]+)', r'\1=[redacted]', text)
+    text = re.sub(r'(?i)(bearer|basic)\s+[a-z0-9._~+/=-]+', r'\1 [redacted]', text)
+    return text[:300]
+
+
+def render_ntfy_message(event, alert_type, message, max_available=None, players=None):
+    template = event.get('custom_ntfy_template')
+    if not template:
+        return message
+
+    replacements = {
+        '{title}': event.get('title') or '',
+        '{available}': '' if event.get('available_places') is None else str(event.get('available_places')),
+        '{max}': '' if max_available is None else str(max_available),
+        '{players}': '' if players is None else str(players),
+        '{source}': event.get('source_name') or '',
+        '{date}': event.get('date_info') or '',
+        '{url}': event.get('link') or '',
+        '{alert_type}': alert_type,
+    }
+    rendered = str(template)
+    for placeholder, value in replacements.items():
+        rendered = rendered.replace(placeholder, value)
+    return rendered
+
+
+def send_event_notification(event, alert_type, title, message, priority='default', tags=None, max_available=None, players=None):
+    key = alert_cooldown_key('event', alert_type, event['id'])
+    if not alert_allowed(key):
+        logger.info('Skipping ntfy alert due to cooldown: %s %s', alert_type, event['link'])
+        return False
+
+    custom_url = event.get('custom_ntfy_url')
+    if custom_url:
+        validate_url_for_request(custom_url, build_request_policy(custom_url))
+
+    send_alert(
+        title,
+        render_ntfy_message(event, alert_type, message, max_available, players),
+        tags=tags or ['ticket'],
+        priority=priority,
+        click=event.get('link'),
+        url=custom_url,
+    )
+    mark_alert_sent(key)
+    return True
+
+
+def maybe_send_event_notifications(event, previous_state, is_new, max_available, is_first_run):
+    if is_first_run and not alert_on_first_run():
+        return
+
+    source_name = event.get('source_name') or 'Nieznane zrodlo'
+    event_title = event.get('title') or 'Nieznane wydarzenie'
+    available = event['available_places'] if event.get('measurement_known') else None
+    previous_available = previous_state.get('current_available') if previous_state else None
+    players = cumulative_players_for_event(event['id'], max_available, available)
+    review_needed, review_reason = event_requires_review(event)
+
+    if review_needed:
+        send_event_notification(
+            event,
+            'needs_review',
+            f'Do sprawdzenia: {event_title}',
+            f'{source_name}\nPowod: {review_reason}\nData: {event.get("date_info") or "brak"}\nURL: {event.get("link")}',
+            priority='low',
+            tags=['warning', 'mag'],
+            max_available=max_available,
+            players=players,
+        )
+        return
+
+    if is_new:
+        send_event_notification(
+            event,
+            'new_event',
+            f'Nowe wydarzenie: {event_title}',
+            f'{source_name}\nData: {event.get("date_info")}\nGracze: {players if players is not None else "?"}\nDostepne miejsca: {available}/{max_available}',
+            priority='high',
+            tags=['new', 'calendar', 'ticket'],
+            max_available=max_available,
+            players=players,
+        )
+
+    if previous_available == 0 and available is not None and available > 0:
+        send_event_notification(
+            event,
+            'availability_returned',
+            f'Wrocily miejsca: {event_title}',
+            f'{source_name}\nDostepne miejsca: {available}/{max_available}\nGracze: {players if players is not None else "?"}',
+            priority='high',
+            tags=['white_check_mark', 'ticket'],
+            max_available=max_available,
+            players=players,
+        )
+
+    if available is not None and available <= 3 and (previous_available is None or previous_available > 3 or is_new):
+        send_event_notification(
+            event,
+            'low_availability',
+            f'Malo miejsc: {event_title}',
+            f'{source_name}\nZostalo: {available}/{max_available}\nGracze: {players if players is not None else "?"}',
+            priority='urgent',
+            tags=['rotating_light', 'warning', 'ticket'],
+            max_available=max_available,
+            players=players,
+        )
+
+
+def notify_source_error(source, reason, detail=None):
+    source_id = source.get('id') or source.get('name') or source.get('list_url')
+    key = alert_cooldown_key('source', reason, source_id)
+    if not alert_allowed(key):
+        logger.info('Skipping source error alert due to cooldown: %s %s', source.get('name'), reason)
+        return False
+
+    message = f'{source.get("name") or "Nieznane zrodlo"}\nPowod: {reason}'
+    if detail:
+        message += f'\nSzczegoly: {sanitize_alert_detail(detail)}'
+    if source.get('list_url'):
+        message += f'\nURL: {sanitize_url_for_log(source.get("list_url"))}'
+
+    custom_url = source.get('ntfy_url')
+    if custom_url:
+        try:
+            validate_url_for_request(custom_url, build_request_policy(custom_url))
+        except URLBlockedError as exc:
+            logger.error('Skipping custom source ntfy URL for %s: %s', source.get('name'), exc)
+            custom_url = None
+
+    send_alert(
+        f'Problem scrapera: {source.get("name") or "zrodlo"}',
+        message,
+        tags=['warning', 'rotating_light'],
+        priority='high',
+        click=source.get('list_url'),
+        url=custom_url,
+    )
+    mark_alert_sent(key)
+    return True
 
 
 def configured_lease_seconds():
@@ -578,12 +835,14 @@ def process_api_source(source, list_url, custom_headers, request_policy, summary
     response_text = safe_get(list_url, custom_headers=custom_headers, policy=request_policy)
     if not response_text:
         logger.warning('Could not fetch API data: %s', list_url)
+        notify_source_error(source, 'api_fetch_failed')
         return
 
     try:
         api_data = json.loads(response_text)
     except Exception as exc:
         logger.error('Could not parse JSON from %s: %s', list_url, exc)
+        notify_source_error(source, 'api_json_parse_failed', exc)
         return
 
     events_list_path = source.get('list_links_selector')
@@ -610,10 +869,12 @@ def process_html_source(source, list_url, custom_headers, request_policy, summar
     list_html = safe_get(list_url, custom_headers=custom_headers, policy=request_policy)
     if not list_html:
         logger.warning('Could not fetch list from %s', list_url)
+        notify_source_error(source, 'list_fetch_failed')
         return
     if is_antibot_page(list_html):
         summary.rejected += 1
         logger.warning('Rejected source %s: antibot_page', source.get('name'))
+        notify_source_error(source, 'antibot_page')
         return
 
     event_candidates = get_event_candidates(list_html, list_url, source.get('list_links_selector'))
@@ -657,6 +918,7 @@ def process_html_source(source, list_url, custom_headers, request_policy, summar
                 'rejection_reason': event_data['rejection_reason'],
                 'image_url': event_data['image_url'],
                 'source_id': source.get('id'),
+                'source_name': source.get('name'),
                 'custom_ntfy_url': source.get('ntfy_url'),
                 'custom_ntfy_template': source.get('ntfy_template'),
             }
@@ -718,9 +980,11 @@ def run_scraper(is_first_run=False):
             except URLBlockedError as exc:
                 summary.rejected += 1
                 logger.warning('Rejected source %s: %s', source.get('name'), exc)
+                notify_source_error(source, 'source_url_blocked', exc)
             except Exception:
                 summary.rejected += 1
                 logger.exception('Source failed: %s', source.get('name'))
+                notify_source_error(source, 'source_failed')
 
         summary_payload = summary.as_dict()
         logger.info('Scrape run completed. Summary: %s', summary_payload)

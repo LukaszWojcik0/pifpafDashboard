@@ -10,6 +10,7 @@ export interface Event {
   image_url: string | null;
   last_seen: string;
   source_name: string | null;
+  potential_players: number | null;
 }
 
 export interface AdminEvent extends Event {

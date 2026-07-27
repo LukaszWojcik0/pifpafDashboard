@@ -200,6 +200,110 @@ class DbUnknownTests(TempDbTest):
         self.assertEqual([row['status'] for row in snapshots], ['available', 'sold_out'])
 
 
+class NtfyAlertTests(TempDbTest):
+    def event_payload(self, **overrides):
+        data = {
+            'id': 'event-alert-1',
+            'title': 'Alpha Arena',
+            'link': 'https://arenawalki.pl/events/alpha',
+            'date_info': '2026-08-01',
+            'available_places': 5,
+            'measurement_known': True,
+            'rejection_reason': None,
+            'image_url': None,
+            'source_id': 1,
+            'source_name': 'Arena Walki',
+            'custom_ntfy_url': None,
+            'custom_ntfy_template': None,
+        }
+        data.update(overrides)
+        return data
+
+    def test_new_event_sends_ntfy(self):
+        with patch('scraper.send_alert') as send_alert:
+            summary = scraper.ScrapeSummary()
+            scraper.save_event(self.event_payload(), summary, is_first_run=False)
+
+        self.assertEqual(send_alert.call_count, 1)
+        args, kwargs = send_alert.call_args
+        self.assertIn('Nowe wydarzenie', args[0])
+        self.assertEqual(kwargs['priority'], 'high')
+
+    def test_availability_returned_from_zero_sends_high_ntfy(self):
+        db.update_event('event-alert-1', 'Alpha Arena', 'https://arenawalki.pl/events/alpha', '2026-08-01', 0)
+
+        with patch('scraper.send_alert') as send_alert:
+            summary = scraper.ScrapeSummary()
+            scraper.save_event(self.event_payload(available_places=5), summary, is_first_run=False)
+
+        self.assertEqual(send_alert.call_count, 1)
+        args, kwargs = send_alert.call_args
+        self.assertIn('Wrocily miejsca', args[0])
+        self.assertEqual(kwargs['priority'], 'high')
+
+    def test_low_availability_sends_urgent_once(self):
+        db.update_event('event-alert-1', 'Alpha Arena', 'https://arenawalki.pl/events/alpha', '2026-08-01', 5)
+
+        with patch('scraper.send_alert') as send_alert:
+            summary = scraper.ScrapeSummary()
+            scraper.save_event(self.event_payload(available_places=3), summary, is_first_run=False)
+            scraper.save_event(self.event_payload(available_places=3), summary, is_first_run=False)
+
+        self.assertEqual(send_alert.call_count, 1)
+        args, kwargs = send_alert.call_args
+        self.assertIn('Malo miejsc', args[0])
+        self.assertEqual(kwargs['priority'], 'urgent')
+
+    def test_event_needing_admin_review_sends_low_ntfy(self):
+        with patch('scraper.send_alert') as send_alert:
+            summary = scraper.ScrapeSummary()
+            scraper.save_event(
+                self.event_payload(
+                    title='Nieznane wydarzenie',
+                    date_info='Unknown Date',
+                    available_places=None,
+                    measurement_known=False,
+                    rejection_reason='tickets_not_found',
+                ),
+                summary,
+                is_first_run=False,
+            )
+
+        self.assertEqual(send_alert.call_count, 1)
+        args, kwargs = send_alert.call_args
+        self.assertIn('Do sprawdzenia', args[0])
+        self.assertEqual(kwargs['priority'], 'low')
+
+    def test_source_error_alert_has_cooldown(self):
+        with patch('scraper.send_alert') as send_alert:
+            scraper.notify_source_error(source(), 'list_fetch_failed')
+            scraper.notify_source_error(source(), 'list_fetch_failed')
+
+        self.assertEqual(send_alert.call_count, 1)
+        args, kwargs = send_alert.call_args
+        self.assertIn('Problem scrapera', args[0])
+        self.assertEqual(kwargs['priority'], 'high')
+
+    def test_custom_ntfy_template_gets_new_player_context(self):
+        event = self.event_payload(
+            custom_ntfy_template='{title}|{source}|{available}/{max}|players={players}|{alert_type}',
+        )
+
+        with patch('scraper.send_alert') as send_alert:
+            summary = scraper.ScrapeSummary()
+            scraper.save_event(event, summary, is_first_run=False)
+
+        args, _kwargs = send_alert.call_args
+        self.assertEqual(args[1], 'Alpha Arena|Arena Walki|5/5|players=0|new_event')
+
+    def test_cumulative_players_do_not_drop_after_pool_reset(self):
+        db.update_event('event-alert-1', 'Alpha Arena', 'https://arenawalki.pl/events/alpha', '2026-08-01', 4)
+        db.update_event('event-alert-1', 'Alpha Arena', 'https://arenawalki.pl/events/alpha', '2026-08-01', 40)
+        db.update_event('event-alert-1', 'Alpha Arena', 'https://arenawalki.pl/events/alpha', '2026-08-01', 39)
+
+        self.assertEqual(scraper.cumulative_players_for_event('event-alert-1', 40, 39), 37)
+
+
 class FetchTests(unittest.TestCase):
     def test_timeout_returns_none(self):
         with patch('request_security.resolve_host_ips', return_value=[PUBLIC_IP]):
